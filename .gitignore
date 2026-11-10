@@ -1,0 +1,57 @@
+
+# Dependencies
+node_modules/
+
+# Expo
+.expo/
+dist/
+web-build/
+expo-env.d.ts
+
+# Android: conservar el proyecto nativo, ignorar archivos generados
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/.cxx/
+android/app/.cxx/
+
+# iOS generated
+ios/
+
+# Native secrets and signing files
+*.jks
+*.keystore
+*.p8
+*.p12
+*.key
+*.mobileprovision
+*.pem
+
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+!.env.sample
+
+# Metro
+.metro-health-check*
+
+# Debug
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+
+# TypeScript
+*.tsbuildinfo
+
+# macOS
+.DS_Store
+
+# Temporary files
+*.orig.*
+
+*.keystore
+
+# Local error logs
+error*.txt
