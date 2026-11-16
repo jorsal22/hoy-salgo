@@ -55,6 +55,14 @@ android {
             keyAlias 'androiddebugkey'
             keyPassword 'android'
         }
+        upload {
+            if (findProperty('HOYSALGO_UPLOAD_STORE_FILE')) {
+                storeFile file(findProperty('HOYSALGO_UPLOAD_STORE_FILE'))
+                storePassword findProperty('HOYSALGO_UPLOAD_STORE_PASSWORD')
+                keyAlias findProperty('HOYSALGO_UPLOAD_KEY_ALIAS')
+                keyPassword findProperty('HOYSALGO_UPLOAD_KEY_PASSWORD')
+            }
+        }
     }
 
     buildTypes {
@@ -62,7 +70,7 @@ android {
             signingConfig signingConfigs.debug
         }
         release {
-            signingConfig signingConfigs.debug
+            signingConfig findProperty('HOYSALGO_UPLOAD_STORE_FILE') ? signingConfigs.upload : signingConfigs.debug
             def enableShrinkResources = findProperty('android.enableShrinkResourcesInReleaseBuilds') ?: 'false'
             shrinkResources enableShrinkResources.toBoolean()
             minifyEnabled enableMinifyInReleaseBuilds
