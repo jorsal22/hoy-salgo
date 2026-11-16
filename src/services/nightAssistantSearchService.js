@@ -11,6 +11,8 @@ import {
   sortByProximity,
 } from './geoService.js';
 
+const MAX_RESULTS = 8;
+
 const normalize = (value) =>
   String(value || '')
     .normalize('NFD')
@@ -399,7 +401,7 @@ export const searchAssistantEvents = (message, sourceEvents, now = Date.now(), o
     matches = sortByProximity(matches, userLocation);
   }
 
-  let recommendations = matches.slice(0, 3);
+  let recommendations = matches.slice(0, MAX_RESULTS);
   let reply = '';
   if (matches.length) {
     reply = matches.length === 1

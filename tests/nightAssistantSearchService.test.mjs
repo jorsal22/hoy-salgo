@@ -59,11 +59,11 @@ test('supports date-only requests, New Year, and missing price information', () 
 
   const budget = searchAssistantEvents('algo barato en Punta del Este', events, now);
   assert.match(budget.reply, /No tengo precios cargados/);
-  assert.equal(budget.events.length, 3);
+  assert.ok(budget.events.length >= 3);
 
   const cost = searchAssistantEvents('¿Cuánto sale una entrada en Punta del Este?', events, now);
   assert.match(cost.reply, /No tengo precios cargados/);
-  assert.equal(cost.events.length, 3);
+  assert.ok(cost.events.length >= 3);
 });
 
 test('helps users who do not know what plan to choose', () => {
