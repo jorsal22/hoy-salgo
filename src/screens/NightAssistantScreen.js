@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -18,7 +18,8 @@ import { filterUpcomingEvents, formatEventDate } from '../services/eventDateServ
 import { filterVerifiedEvents } from '../services/eventVerificationService';
 import { fetchAllPages } from '../services/paginationService';
 import { recordTicketClick } from '../services/analyticsService';
-import { normalizeTicketUrl, openTrackedTicketUrl } from '../services/ticketUrlService';
+import { getTicketShareLine, normalizeTicketUrl, openTrackedTicketUrl } from '../services/ticketUrlService';
+import { getMapsSearchUrl } from '../services/mapsService';
 import {
   buildAssistantHistory,
   getAssistantHelpReply,
@@ -44,8 +45,58 @@ const createMessageId = () => {
   return `${Date.now()}-${nextMessageId}`;
 };
 
-function AssistantEventCard({ event }) {
+const shareAssistantEvent = async (event, ticketUrl) => {
+  const where = [event.neighborhood, event.city].filter(Boolean).join(', ');
+  const lines = [
+    `🎉 *${event.title}*`,
+    event.venue_name ? `🏠 ${event.venue_name}` : null,
+    where ? `📍 ${where}` : null,
+    event.event_date ? `🗓️ ${formatEventDate(event.event_date)}` : null,
+    event.age_range ? `🔞 ${event.age_range}` : null,
+    getTicketShareLine(ticketUrl),
+    '',
+    '_Encontrado en Hoy Salgo — tu guía para salir en Uruguay_',
+  ].filter((line) => line !== null).join('\n');
+  const text = encodeURIComponent(lines);
+  try {
+    const native = `whatsapp://send?text=${text}`;
+    await Linking.openURL((await Linking.canOpenURL(native)) ? native : `https://wa.me/?text=${text}`);
+  } catch {
+    Alert.alert('Error', 'No se pudo abrir WhatsApp.');
+  }
+};
+
+function AssistantEventCard({ event: baseEvent }) {
+  const [details, setDetails] = useState(null);
+  const event = details ? { ...baseEvent, ...details.event } : baseEvent;
   const ticketUrl = normalizeTicketUrl(event.ticket_url);
+  const mapUrl = getMapsSearchUrl({
+    name: event.venue_name,
+    address: details?.address,
+    neighborhood: event.neighborhood,
+    city: event.city,
+  });
+
+  useEffect(() => {
+    let active = true;
+    supabase
+      .from('events')
+      .select('description, neighborhood, age_range, clubs(address)')
+      .eq('id', baseEvent.id)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (!active || !data) return;
+        const { clubs, ...rest } = data;
+        const club = Array.isArray(clubs) ? clubs[0] : clubs;
+        setDetails({ event: rest, address: club?.address || null });
+      })
+      .catch(() => {});
+    return () => { active = false; };
+  }, [baseEvent.id]);
+
+  const openMap = () => {
+    if (mapUrl) Linking.openURL(mapUrl).catch(() => Alert.alert('Error', 'No se pudo abrir el mapa.'));
+  };
 
   const openTicketPage = async () => {
     if (!ticketUrl) return;
@@ -64,8 +115,12 @@ function AssistantEventCard({ event }) {
       <Text style={styles.eventDate}>{formatEventDate(event.event_date)}</Text>
       <Text style={styles.eventTitle}>{event.title || 'Evento'}</Text>
       <Text style={styles.eventVenue}>
-        {[event.venue_name, event.city].filter(Boolean).join(' · ') || 'Lugar a confirmar'}
+        {[event.venue_name, event.neighborhood, event.city].filter(Boolean).join(' · ') || 'Lugar a confirmar'}
       </Text>
+      {details?.address ? <Text style={styles.eventAddress}>📍 {details.address}</Text> : null}
+      {event.description ? (
+        <Text numberOfLines={4} style={styles.eventDescription}>{event.description}</Text>
+      ) : null}
       {event.category ? (
         <Text style={styles.eventCategory}>
           {[event.category, event.age_range].filter(Boolean).join(' · ')}
@@ -83,6 +138,20 @@ function AssistantEventCard({ event }) {
       ) : (
         <Text style={styles.missingLink}>No hay enlace de entradas cargado.</Text>
       )}
+      <View style={styles.actionRow}>
+        {mapUrl ? (
+          <TouchableOpacity accessibilityRole="button" onPress={openMap} style={styles.secondaryButton}>
+            <Text style={styles.secondaryButtonText}>📍 Cómo llegar</Text>
+          </TouchableOpacity>
+        ) : null}
+        <TouchableOpacity
+          accessibilityRole="button"
+          onPress={() => shareAssistantEvent(event, ticketUrl)}
+          style={styles.secondaryButton}
+        >
+          <Text style={styles.secondaryButtonText}>💬 Compartir</Text>
+        </TouchableOpacity>
+      </View>
     </View>
   );
 }
@@ -404,6 +473,20 @@ const styles = StyleSheet.create({
     marginTop: 10,
   },
   ticketButtonText: { color: '#FFF', fontSize: 13, fontWeight: '800' },
+  eventAddress: { color: '#DCE4EF', fontSize: 12, marginTop: 4 },
+  eventDescription: { color: '#B6C2D2', fontSize: 12, lineHeight: 17, marginTop: 6 },
+  actionRow: { flexDirection: 'row', gap: 8, marginTop: 8 },
+  secondaryButton: {
+    flex: 1,
+    minHeight: 38,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#3B4C69',
+    backgroundColor: '#18233A',
+  },
+  secondaryButtonText: { color: '#E2E8F0', fontSize: 12, fontWeight: '800' },
   missingLink: { color: '#F6D68A', fontSize: 11, lineHeight: 16, marginTop: 9 },
   typingIndicator: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 },
   typingText: { color: '#94A3B8', fontSize: 12 },
