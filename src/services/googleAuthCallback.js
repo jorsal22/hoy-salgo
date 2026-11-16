@@ -1,5 +1,8 @@
 
 import { supabase } from '../config/supabase';
+import { createAuthCoordinator, resolveCallbackFlowId } from './authCoordinator';
+
+export const authCoordinator = createAuthCoordinator(supabase.auth);
 
 export const isGoogleAuthCallback = (value) => {
   try {
@@ -19,74 +22,64 @@ export const isGoogleAuthCallback = (value) => {
   }
 };
 
-// Comparte la misma operación si App.js y LoginScreen.js
-// reciben simultáneamente el mismo callback.
-const processingCodes = new Map();
+export const processGoogleAuthCallback = async (rawUrl, flowId) => {
+  console.log('[GOOGLE CALLBACK] Iniciando procesamiento');
 
-export const processGoogleAuthCallback = async (rawUrl) => {
-  if (!isGoogleAuthCallback(rawUrl)) return false;
+  if (!isGoogleAuthCallback(rawUrl)) {
+    console.log('[GOOGLE CALLBACK] URL no reconocida');
+    return false;
+  }
 
   const url = new URL(rawUrl);
   const params = new URLSearchParams(url.search);
 
-  new URLSearchParams(url.hash.replace(/^#/, '')).forEach((value, key) => {
-    if (!params.has(key)) {
-      params.set(key, value);
+  new URLSearchParams(url.hash.replace(/^#/, '')).forEach(
+    (value, key) => {
+      if (!params.has(key)) {
+        params.set(key, value);
+      }
     }
-  });
+  );
 
   const oauthError =
     params.get('error_description') || params.get('error');
 
   if (oauthError) {
+    console.error('[GOOGLE CALLBACK] Error OAuth:', oauthError);
     throw new Error(oauthError);
   }
 
   const code = params.get('code');
 
+  console.log('[GOOGLE CALLBACK] Código recibido:', !!code);
+
   if (code) {
-    // Si ya está en proceso, esperar la misma operación.
-    if (processingCodes.has(code)) {
-      return await processingCodes.get(code);
-    }
-
-    const exchangePromise = (async () => {
-      const { error } =
-        await supabase.auth.exchangeCodeForSession(code);
-
-      if (error) {
-        throw error;
-      }
-
-      return true;
-    })();
-
-    processingCodes.set(code, exchangePromise);
-
-    try {
-      return await exchangePromise;
-    } catch (error) {
-      // Permite reintentar si el intercambio falló.
-      processingCodes.delete(code);
-      throw error;
-    }
+    console.log('[PKCE] Iniciando exchangeCodeForSession');
+    const callbackFlowId = resolveCallbackFlowId(params.get('sb_flow_id'), flowId);
+    return authCoordinator.exchangeCode(code, callbackFlowId);
   }
 
   const accessToken = params.get('access_token');
   const refreshToken = params.get('refresh_token');
 
   if (accessToken && refreshToken) {
+    console.log('[GOOGLE CALLBACK] Callback con tokens');
+
     const { error } = await supabase.auth.setSession({
       access_token: accessToken,
       refresh_token: refreshToken,
     });
 
     if (error) {
+      console.error('[GOOGLE CALLBACK] Error al establecer sesión:', error.message);
       throw error;
     }
 
+    console.log('[GOOGLE CALLBACK] Sesión establecida');
     return true;
   }
+
+  console.error('[GOOGLE CALLBACK] No se recibió código ni tokens');
 
   throw new Error(
     'El callback de Google no trajo ni "code" ni tokens.'

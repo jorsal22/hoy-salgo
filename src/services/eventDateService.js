@@ -1,5 +1,21 @@
 
-const EVENT_DATE_PATTERN = /^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2}))?$/;
+const EVENT_DATE_PATTERN = /^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?(Z|[+-]\d{2}(?::?\d{2})?)?)?$/;
+const URUGUAY_DATE_TIME = new Intl.DateTimeFormat('en-GB', {
+  timeZone: 'America/Montevideo',
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
+  second: '2-digit',
+  hourCycle: 'h23',
+});
+
+const getUruguayDateParts = (date) => Object.fromEntries(
+  URUGUAY_DATE_TIME.formatToParts(date)
+    .filter((part) => part.type !== 'literal')
+    .map((part) => [part.type, Number(part.value)])
+);
 
 export const serializeEventDate = (date) => {
   const pad = (value) => String(value).padStart(2, '0');
@@ -10,15 +26,43 @@ export const parseEventDate = (value) => {
   const match = EVENT_DATE_PATTERN.exec(value || '');
   if (!match) return null;
 
-  const [, year, month, day, hour = '0', minute = '0'] = match;
-  const date = new Date(Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute));
+  const [, year, month, day, hour = '0', minute = '0', second = '0', fraction = '', zone] = match;
+  const millisecond = Number(fraction.padEnd(3, '0'));
+  if (zone) {
+    const utcDate = new Date(0);
+    utcDate.setUTCFullYear(Number(year), Number(month) - 1, Number(day));
+    utcDate.setUTCHours(Number(hour), Number(minute), Number(second), millisecond);
+    if (
+      utcDate.getUTCFullYear() !== Number(year) ||
+      utcDate.getUTCMonth() !== Number(month) - 1 ||
+      utcDate.getUTCDate() !== Number(day) ||
+      utcDate.getUTCHours() !== Number(hour) ||
+      utcDate.getUTCMinutes() !== Number(minute) ||
+      utcDate.getUTCSeconds() !== Number(second) ||
+      utcDate.getUTCMilliseconds() !== millisecond
+    ) return null;
+
+    if (zone === 'Z') return utcDate;
+    const offsetDigits = zone.slice(1).replace(':', '');
+    const offsetHours = Number(offsetDigits.slice(0, 2));
+    const offsetMinutes = Number(offsetDigits.slice(2) || '0');
+    if (offsetHours > 23 || offsetMinutes > 59) return null;
+    const offset = (offsetHours * 60 + offsetMinutes) * 60 * 1000;
+    return new Date(utcDate.getTime() + (zone[0] === '+' ? -offset : offset));
+  }
+
+  const date = new Date(
+    Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute), Number(second), millisecond
+  );
 
   if (
     date.getFullYear() !== Number(year) ||
     date.getMonth() !== Number(month) - 1 ||
     date.getDate() !== Number(day) ||
     date.getHours() !== Number(hour) ||
-    date.getMinutes() !== Number(minute)
+    date.getMinutes() !== Number(minute) ||
+    date.getSeconds() !== Number(second) ||
+    date.getMilliseconds() !== millisecond
   ) {
     return null;
   }
@@ -26,24 +70,51 @@ export const parseEventDate = (value) => {
   return date;
 };
 
-export const getEventExpiryTimestamp = (value) => {
-  const date = parseEventDate(value);
+export const getEventExpiryTimestamp = (value, endValue = null) => {
+  const match = EVENT_DATE_PATTERN.exec(value || '');
+  if (!match) return null;
+  const date = parseEventDate(match[8] ? value : `${value}${match[4] ? '' : 'T00:00'}-03:00`);
   if (!date) return null;
 
-  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
-    date.setHours(23, 59, 59, 999);
+  if (endValue != null && endValue !== '') {
+    const end = parseEventDate(endValue);
+    return end && end.getTime() > date.getTime() ? end.getTime() : null;
   }
 
-  return date.getTime();
+  const parts = match[8]
+    ? getUruguayDateParts(date)
+    : { year: Number(match[1]), month: Number(match[2]), day: Number(match[3]) };
+  const target = Date.UTC(parts.year, parts.month - 1, parts.day + 1, 8);
+  const probe = getUruguayDateParts(new Date(target));
+  const probeAsUtc = Date.UTC(
+    probe.year, probe.month - 1, probe.day, probe.hour, probe.minute, probe.second
+  );
+  return target - (probeAsUtc - target);
 };
 
-export const isEventExpired = (value, now = Date.now()) => {
-  const expiryTimestamp = getEventExpiryTimestamp(value);
-  return expiryTimestamp !== null && expiryTimestamp <= now;
+export const isEventExpired = (value, now = Date.now(), endValue = null) => {
+  const expiryTimestamp = getEventExpiryTimestamp(value, endValue);
+  if (expiryTimestamp === null) {
+    console.warn('No se puede determinar la finalización del evento.', { eventDate: value, eventEndDate: endValue });
+    return true;
+  }
+  return expiryTimestamp <= now;
 };
 
-export const getEventDateKey = (value) =>
-  /^\d{4}-\d{2}-\d{2}/.test(value || '') ? value.slice(0, 10) : '';
+export const filterUpcomingEvents = (events, now = Date.now()) =>
+  events.filter((event) => {
+    const expiryTimestamp = getEventExpiryTimestamp(event.event_date, event.event_end_date);
+    return expiryTimestamp !== null && expiryTimestamp > now;
+  });
+
+export const getEventDateKey = (value) => {
+  if (!/^\d{4}-\d{2}-\d{2}/.test(value || '')) return '';
+  if (/[T ]\d{2}:\d{2}.*(?:Z|[+-]\d{2}(?::?\d{2})?)$/.test(value)) {
+    const date = parseEventDate(value);
+    return date ? getLocalDateKey(date) : '';
+  }
+  return value.slice(0, 10);
+};
 
 export const getLocalDateKey = (date = new Date()) => {
   const pad = (value) => String(value).padStart(2, '0');

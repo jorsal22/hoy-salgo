@@ -1,4 +1,5 @@
-import React, { useEffect, useState } from 'react';
+/* eslint-disable react-hooks/set-state-in-effect */
+import React, { useCallback, useEffect, useState } from 'react';
 import { 
   View, 
   Text, 
@@ -10,34 +11,36 @@ import {
   ActivityIndicator,
   SafeAreaView
 } from 'react-native';
-import { supabase } from '../lib/supabase'; // Ajustá la ruta a tu cliente de Supabase
+import { supabase } from '../config/supabase';
 
 export default function ClubDetailScreen({ route, navigation }) {
   const { club } = route.params;
   const [clubEvents, setClubEvents] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    fetchClubEvents();
-  }, [club]);
-
-  const fetchClubEvents = async () => {
+  const fetchClubEvents = useCallback(async () => {
     try {
       setLoading(true);
       const { data, error } = await supabase
         .from('events')
         .select('*')
         .eq('venue_name', club.name)
+        .eq('verification_status', 'verified')
         .order('event_date', { ascending: true });
 
       if (error) throw error;
       setClubEvents(data || []);
     } catch (err) {
-      console.error('Error al cargar eventos:', err.message);
+      const message = err instanceof Error ? err.message : String(err);
+      console.error('Error al cargar eventos:', message);
     } finally {
       setLoading(false);
     }
-  };
+  }, [club.name]);
+
+  useEffect(() => {
+    fetchClubEvents();
+  }, [fetchClubEvents]);
 
   const openInstagram = () => {
     if (club.instagram_url) {

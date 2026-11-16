@@ -15,9 +15,11 @@ import PromotionWhatsAppButton from '../components/PromotionWhatsAppButton';
 import { getFavoriteErrorMessage, fetchFavoriteItems } from '../services/favoriteService';
 import { formatEventDate, isEventExpired } from '../services/eventDateService';
 import useCurrentTime from '../hooks/useCurrentTime';
+import { getClubLogoSource } from '../constants/clubLogos';
 
 export default function FavoritesScreen({ userId, onBack, onSignIn }) {
   const [items, setItems] = useState([]);
+  const [hiddenEventCount, setHiddenEventCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState('');
   const currentTime = useCurrentTime();
@@ -25,7 +27,8 @@ export default function FavoritesScreen({ userId, onBack, onSignIn }) {
   const loadFavorites = useCallback(async () => {
     try {
       const result = await fetchFavoriteItems(userId);
-      setItems(result);
+      setItems(result.items);
+      setHiddenEventCount(result.hiddenEventCount);
       setErrorMessage('');
     } catch (error) {
       setErrorMessage(getFavoriteErrorMessage(error));
@@ -43,23 +46,25 @@ export default function FavoritesScreen({ userId, onBack, onSignIn }) {
       items.filter(
         (item) =>
           item.itemType !== 'event' ||
-          !isEventExpired(item.event_date, currentTime)
+          !isEventExpired(item.event_date, currentTime, item.event_end_date)
       ),
     [items, currentTime]
   );
 
   const renderItem = ({ item }) => {
     const isEvent = item.itemType === 'event';
-    const imageUrl = isEvent ? item.image_url : item.logo_url;
+    const imageSource = isEvent
+      ? item.image_url ? { uri: item.image_url } : null
+      : getClubLogoSource(item.id, item.logo_url);
     const subtitle = isEvent
       ? [item.venue_name, item.city].filter(Boolean).join(' · ')
       : [item.neighborhood, item.city].filter(Boolean).join(' · ');
 
     return (
       <View style={styles.card}>
-        {imageUrl ? (
+        {imageSource ? (
           <Image
-            source={{ uri: imageUrl }}
+            source={imageSource}
             style={styles.image}
             resizeMode="contain"
             accessibilityLabel={`${isEvent ? 'Flyer' : 'Logo'} de ${isEvent ? item.title : item.name}`}
@@ -107,12 +112,18 @@ export default function FavoritesScreen({ userId, onBack, onSignIn }) {
   ) : (
     <View style={styles.stateCard}>
       <Text style={styles.stateTitle}>
-        {items.length ? 'No tenés eventos vigentes' : 'Todavía no guardaste favoritos'}
+        {hiddenEventCount
+          ? 'Tus eventos pendientes están ocultos'
+          : items.length
+            ? 'No tenés eventos vigentes'
+            : 'Todavía no guardaste favoritos'}
       </Text>
       <Text style={styles.stateMessage}>
-        {items.length
-          ? 'Los eventos dejan de aparecer cuando pasa su fecha y hora. Tus boliches favoritos siguen guardados.'
-          : 'Guardá eventos y boliches con el corazón para encontrarlos acá.'}
+        {hiddenEventCount
+          ? `${hiddenEventCount} evento${hiddenEventCount === 1 ? '' : 's'} guardado${hiddenEventCount === 1 ? '' : 's'} no se muestra${hiddenEventCount === 1 ? '' : 'n'} hasta que tenga una fuente verificada.`
+          : items.length
+            ? 'Los eventos dejan de aparecer cuando pasa su fecha y hora. Tus boliches favoritos siguen guardados.'
+            : 'Guardá eventos y boliches con el corazón para encontrarlos acá.'}
       </Text>
     </View>
   );
@@ -136,6 +147,11 @@ export default function FavoritesScreen({ userId, onBack, onSignIn }) {
               <Text style={styles.brand}>HOY SALGO</Text>
             </View>
             <PromotionWhatsAppButton />
+            {hiddenEventCount > 0 ? (
+              <Text style={styles.hiddenFavoritesNotice}>
+                {hiddenEventCount} evento{hiddenEventCount === 1 ? '' : 's'} guardado{hiddenEventCount === 1 ? '' : 's'} pendiente{hiddenEventCount === 1 ? '' : 's'} de verificación.
+              </Text>
+            ) : null}
           </View>
         }
         ListEmptyComponent={emptyContent}
@@ -157,6 +173,13 @@ export default function FavoritesScreen({ userId, onBack, onSignIn }) {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#0B1020' },
   listContainer: { flexGrow: 1, paddingHorizontal: 18, paddingBottom: 28 },
+  hiddenFavoritesNotice: {
+    color: '#FCD34D',
+    fontSize: 12,
+    lineHeight: 18,
+    marginTop: 10,
+    paddingHorizontal: 12,
+  },
   header: {
     minHeight: 54,
     flexDirection: 'row',

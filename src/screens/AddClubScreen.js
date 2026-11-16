@@ -164,12 +164,12 @@ export default function AddClubScreen({ club, onBack, onCreated }) {
             .from('clubs')
             .update(clubValues)
             .eq('id', club.id)
-            .select('id')
+            .select('id, verification_status')
             .maybeSingle()
         : await supabase
             .from('clubs')
             .insert({ ...clubValues, created_by: user.id })
-            .select('id')
+            .select('id, verification_status')
             .maybeSingle();
       if (error) {
         throw error;
@@ -193,7 +193,7 @@ export default function AddClubScreen({ club, onBack, onCreated }) {
       uploadedLogoPath = null;
       Alert.alert(
         '¡Listo!',
-        `${isEditing ? 'Los datos del boliche se actualizaron.' : 'El boliche ya aparece en la lista fija.'}${cleanupWarning}`
+        `${data.verification_status === 'verified' ? 'Los datos del boliche se actualizaron.' : 'El boliche quedó pendiente de revisión antes de mostrarse al público.'}${cleanupWarning}`
       );
       onCreated?.();
     } catch (error) {

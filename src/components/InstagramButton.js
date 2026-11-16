@@ -17,7 +17,7 @@ export default function InstagramButton({ value, label = 'Instagram' }) {
       } else {
         await Linking.openURL(instagramUrl);
       }
-    } catch (error) {
+    } catch (_error) {
       try {
         await Linking.openURL(instagramUrl);
       } catch {

@@ -63,14 +63,16 @@ export const fetchFavoriteItems = async (userId) => {
     eventIds.length
       ? supabase
           .from('events')
-          .select('id, title, venue_name, city, event_date, image_url')
+          .select('id, title, venue_name, city, event_date, event_end_date, image_url')
           .in('id', eventIds)
+          .eq('verification_status', 'verified')
       : Promise.resolve({ data: [], error: null }),
     clubIds.length
       ? supabase
           .from('clubs')
           .select('id, name, city, neighborhood, logo_url')
           .in('id', clubIds)
+          .eq('verification_status', 'verified')
       : Promise.resolve({ data: [], error: null }),
   ]);
   if (eventsResult.error) throw eventsResult.error;
@@ -82,37 +84,15 @@ export const fetchFavoriteItems = async (userId) => {
       favorite.created_at,
     ])
   );
-  const savedEventSnapshots = (favorites || [])
-    .filter((favorite) => favorite.item_type === 'event')
-    .filter(
-      (favorite) =>
-        !(eventsResult.data || []).some(
-          (event) => String(event.id) === favorite.item_id
-        )
-    )
-    .map((favorite) => ({
-      ...favorite.item_data,
-      id: favorite.item_id,
-      itemType: 'event',
-      favoriteKey: getFavoriteKey('event', favorite.item_id),
-      savedAt: favorite.created_at,
-    }));
-  const savedClubSnapshots = (favorites || [])
-    .filter(
-      (favorite) =>
-        favorite.item_type === 'club' && favorite.item_id.startsWith('event:')
-    )
-    .map((favorite) => ({
-      ...favorite.item_data,
-      id: favorite.item_id,
-      itemType: 'club',
-      favoriteKey: getFavoriteKey('club', favorite.item_id),
-      savedAt: favorite.created_at,
-    }));
+  const visibleEvents = eventsResult.data || [];
+  const visibleEventIds = new Set(visibleEvents.map((event) => String(event.id)));
+  const hiddenEventCount = eventIds.filter((eventId) => !visibleEventIds.has(eventId)).length +
+    (favorites || []).filter(
+      (favorite) => favorite.item_type === 'club' && favorite.item_id.startsWith('event:')
+    ).length;
 
-  return [
-    ...savedEventSnapshots,
-    ...(eventsResult.data || []).map((event) => ({
+  const items = [
+    ...visibleEvents.map((event) => ({
       ...event,
       itemType: 'event',
       favoriteKey: getFavoriteKey('event', event.id),
@@ -124,8 +104,9 @@ export const fetchFavoriteItems = async (userId) => {
       favoriteKey: getFavoriteKey('club', club.id),
       savedAt: favoriteDates.get(getFavoriteKey('club', club.id)),
     })),
-    ...savedClubSnapshots,
   ].sort((first, second) =>
     String(second.savedAt || '').localeCompare(String(first.savedAt || ''))
   );
+
+  return { items, hiddenEventCount };
 };

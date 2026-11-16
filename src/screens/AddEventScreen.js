@@ -19,15 +19,41 @@ import { supabase } from '../config/supabase';
 import { isAdminUser } from '../config/admin';
 import { AGE_RANGES, CATEGORIES, CITIES } from '../constants/eventOptions';
 import { normalizeInstagramUrl } from '../services/instagramService';
-import { serializeEventDate } from '../services/eventDateService';
+import { normalizeTicketUrl } from '../services/ticketUrlService';
+import { parseEventDate, serializeEventDate } from '../services/eventDateService';
+
+const parseEventDateForForm = (value) => {
+  if (typeof value !== 'string' || !value.trim()) return null;
+
+  const normalizedValue = value.trim().replace(
+    /^(\d{4}-\d{2}-\d{2})\s+/,
+    '$1T'
+  );
+  const date = new Date(normalizedValue);
+  return Number.isNaN(date.getTime()) ? null : date;
+};
+
+const formatEndDateForForm = (value) => {
+  const date = parseEventDate(value);
+  if (!date) return '';
+  return new Intl.DateTimeFormat('sv-SE', {
+    timeZone: 'America/Montevideo',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).format(date);
+};
 
 // eventToEdit: objeto completo del evento a editar
 // prefill:      datos parciales del banco de datos
 export default function AddEventScreen({ onBack, onCreated, prefill, eventToEdit }) {
   const isEditing = Boolean(eventToEdit);
 
-  const parsedEditDate = isEditing && eventToEdit.event_date
-    ? new Date(eventToEdit.event_date)
+  const parsedEditDate = isEditing
+    ? parseEventDateForForm(eventToEdit.event_date)
     : null;
 
   const [title, setTitle] = useState(eventToEdit?.title ?? prefill?.title ?? '');
@@ -44,12 +70,25 @@ export default function AddEventScreen({ onBack, onCreated, prefill, eventToEdit
   const [category, setCategory] = useState(eventToEdit?.category ?? prefill?.category ?? 'Boliche');
   const [ageRange, setAgeRange] = useState(eventToEdit?.age_range ?? '+18');
   const [eventDate, setEventDate] = useState(parsedEditDate);
+  const [endDateInput, setEndDateInput] = useState(
+    formatEndDateForForm(eventToEdit?.event_end_date)
+  );
   const [hasSelectedDate, setHasSelectedDate] = useState(isEditing && Boolean(parsedEditDate));
   const [hasSelectedTime, setHasSelectedTime] = useState(isEditing && Boolean(parsedEditDate));
   const [existingImageUrl, setExistingImageUrl] = useState(eventToEdit?.image_url ?? null);
   const [imageAsset, setImageAsset] = useState(null);
   const [instagramUrl, setInstagramUrl] = useState(eventToEdit?.instagram_url ?? prefill?.instagram ?? '');
   const [instagramError, setInstagramError] = useState('');
+  const [ticketUrl, setTicketUrl] = useState(eventToEdit?.ticket_url ?? '');
+  const [ticketSalesEnabled, setTicketSalesEnabled] = useState(
+    eventToEdit?.ticket_sales_enabled ?? false
+  );
+  const [ticketPrice, setTicketPrice] = useState(
+    eventToEdit?.ticket_price_uyu != null ? String(eventToEdit.ticket_price_uyu) : ''
+  );
+  const [ticketCapacity, setTicketCapacity] = useState(
+    eventToEdit?.ticket_capacity != null ? String(eventToEdit.ticket_capacity) : ''
+  );
   const [description, setDescription] = useState(eventToEdit?.description ?? prefill?.description ?? '');
   const [loading, setLoading] = useState(false);
   const isSubmittingRef = useRef(false);
@@ -143,8 +182,24 @@ export default function AddEventScreen({ onBack, onCreated, prefill, eventToEdit
       Alert.alert('Atención ⚠️', `Completá los campos obligatorios (*): ${missing.join(', ')}`);
       return;
     }
+      if (!eventDate || !Number.isFinite(eventDate.getTime())) {
+        Alert.alert('Fecha inválida', 'Elegí una fecha y hora válidas para el evento.');
+        return;
+      }
     if (!isEditing && eventDate && eventDate.getTime() <= Date.now()) {
       Alert.alert('Fecha inválida', 'Elegí una fecha y hora futuras para el evento.');
+      return;
+    }
+    const endText = endDateInput.trim();
+    const endDate = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(endText)
+      ? parseEventDate(`${endText.replace(' ', 'T')}:00-03:00`)
+      : null;
+    const startDateInUruguay = parseEventDate(`${serializeEventDate(eventDate)}-03:00`);
+    if (endText && (!endDate || !startDateInUruguay || endDate.getTime() <= startDateInUruguay.getTime())) {
+      Alert.alert(
+        'Finalización inválida',
+        'Ingresá una fecha y hora posteriores al inicio, en formato AAAA-MM-DD HH:MM.'
+      );
       return;
     }
 
@@ -170,6 +225,55 @@ export default function AddEventScreen({ onBack, onCreated, prefill, eventToEdit
         return;
       }
 
+      const formattedTicketUrl = normalizeTicketUrl(ticketUrl);
+      if (formattedTicketUrl === null) {
+        Alert.alert('Link de entradas inválido', 'Ingresá una dirección HTTPS válida de la ticketera.');
+        return;
+      }
+
+      const ticketPriceValue = ticketPrice.trim()
+        ? Number(ticketPrice.trim().replace(',', '.'))
+        : null;
+      const ticketCapacityValue = ticketCapacity.trim()
+        ? Number(ticketCapacity.trim())
+        : null;
+      const alreadyAllocatedTickets =
+        Number(eventToEdit?.tickets_sold || 0) + Number(eventToEdit?.tickets_reserved || 0);
+
+      if (ticketPriceValue !== null && (!Number.isFinite(ticketPriceValue) || ticketPriceValue < 15)) {
+        Alert.alert('Precio inválido', 'El precio mínimo para cobrar con dLocal en Uruguay es $15 UYU.');
+        return;
+      }
+      if (ticketCapacityValue !== null && (!Number.isInteger(ticketCapacityValue) || ticketCapacityValue < 1)) {
+        Alert.alert('Cupo inválido', 'Ingresá un cupo entero mayor a cero.');
+        return;
+      }
+      if (ticketSalesEnabled && (!ticketPriceValue || !ticketCapacityValue)) {
+        Alert.alert('Faltan datos de entradas', 'Completá el precio y el cupo para habilitar la venta propia.');
+        return;
+      }
+      if (ticketSalesEnabled && formattedTicketUrl) {
+        Alert.alert(
+          'Elegí un solo canal de venta',
+          'Para evitar vender dos veces el mismo cupo, quitá el link externo o desactivá la venta de Hoy Salgo.'
+        );
+        return;
+      }
+      if (ticketCapacityValue !== null && ticketCapacityValue < alreadyAllocatedTickets) {
+        Alert.alert(
+          'Cupo demasiado bajo',
+          `Ya hay ${alreadyAllocatedTickets} entradas vendidas o reservadas para este evento.`
+        );
+        return;
+      }
+      if (alreadyAllocatedTickets > 0 && (!ticketPriceValue || !ticketCapacityValue)) {
+        Alert.alert(
+          'No se puede borrar la configuración',
+          'Este evento ya tiene entradas vendidas o reservadas. Conservá el precio y el cupo; podés desactivar nuevas ventas.'
+        );
+        return;
+      }
+
       // Subir imagen nueva si se eligió una
       let uploadedImage = null;
       if (imageAsset) {
@@ -187,17 +291,29 @@ export default function AddEventScreen({ onBack, onCreated, prefill, eventToEdit
         category,
         age_range: ageRange,
         event_date: serializeEventDate(eventDate),
+        event_end_date: endDate
+          ? endText === formatEndDateForForm(eventToEdit?.event_end_date)
+            ? eventToEdit.event_end_date
+            : endDate.toISOString()
+          : null,
         image_url: finalImageUrl,
         instagram_url: formattedIg,
+        ticket_url: formattedTicketUrl || null,
+        ticket_sales_enabled: ticketSalesEnabled,
+        ticket_price_uyu: ticketPriceValue,
+        ticket_capacity: ticketCapacityValue,
         description,
       };
 
       let dbError;
+      let updatedEvent;
       if (isEditing) {
-        ({ error: dbError } = await supabase
+        ({ data: updatedEvent, error: dbError } = await supabase
           .from('events')
           .update(payload)
-          .eq('id', eventToEdit.id));
+          .eq('id', eventToEdit.id)
+          .select('id')
+          .maybeSingle());
       } else {
         ({ error: dbError } = await supabase.from('events').insert([{
           ...payload,
@@ -206,11 +322,19 @@ export default function AddEventScreen({ onBack, onCreated, prefill, eventToEdit
         }]));
       }
 
-      if (dbError) {
+      if (dbError || (isEditing && !updatedEvent?.id)) {
         if (uploadedImage?.filePath) {
-          await supabase.storage.from('event-images').remove([uploadedImage.filePath]).catch(console.error);
+          const { error: cleanupError } = await supabase.storage
+            .from('event-images')
+            .remove([uploadedImage.filePath]);
+          if (cleanupError) {
+            console.error('No se pudo limpiar el flyer después de fallar la actualización:', cleanupError);
+          }
         }
-        throw dbError;
+        if (dbError) throw dbError;
+        throw new Error(
+          'Supabase no confirmó la actualización. Verificá que el evento exista y que tu cuenta tenga permiso para editarlo.'
+        );
       }
 
       Alert.alert(
@@ -255,6 +379,8 @@ export default function AddEventScreen({ onBack, onCreated, prefill, eventToEdit
   };
 
   const updateEventDate = (mode, selectedDate) => {
+    if (!(selectedDate instanceof Date) || !Number.isFinite(selectedDate.getTime())) return;
+
     if (mode === 'date') setHasSelectedDate(true);
     else setHasSelectedTime(true);
 
@@ -279,10 +405,11 @@ export default function AddEventScreen({ onBack, onCreated, prefill, eventToEdit
     });
   };
 
-  const dateLabel = eventDate && hasSelectedDate
+  const hasValidEventDate = eventDate instanceof Date && Number.isFinite(eventDate.getTime());
+  const dateLabel = hasValidEventDate && hasSelectedDate
     ? new Intl.DateTimeFormat('es-UY', { day: 'numeric', month: 'short', year: 'numeric' }).format(eventDate)
     : 'Elegir fecha';
-  const timeLabel = eventDate && hasSelectedTime
+  const timeLabel = hasValidEventDate && hasSelectedTime
     ? new Intl.DateTimeFormat('es-UY', { hour: '2-digit', minute: '2-digit', hour12: false }).format(eventDate)
     : 'Elegir hora';
   const clubsInCity = clubs.filter((club) => club.city === city);
@@ -445,6 +572,19 @@ export default function AddEventScreen({ onBack, onCreated, prefill, eventToEdit
         </View>
       )}
 
+      <Text style={styles.label}>Fecha y hora de finalización (opcional)</Text>
+      <TextInput
+        style={styles.input}
+        placeholder="AAAA-MM-DD HH:MM, hora de Uruguay"
+        placeholderTextColor="#64748B"
+        value={endDateInput}
+        onChangeText={setEndDateInput}
+        accessibilityLabel="Fecha y hora de finalización en Uruguay"
+      />
+      <Text style={styles.ticketSalesHint}>
+        Si no la conocés, dejala vacía. El evento seguirá visible hasta las 8:00 del día siguiente.
+      </Text>
+
             <Text style={styles.label}>Flyer del Evento 🖼️</Text>
 
       {imageAsset ? (
@@ -493,6 +633,60 @@ export default function AddEventScreen({ onBack, onCreated, prefill, eventToEdit
       />
       {instagramError ? <Text style={styles.instagramError}>{instagramError}</Text> : null}
 
+      <Text style={styles.label}>Link de entradas (opcional)</Text>
+      <TextInput
+        style={styles.input}
+        placeholder="https://ticketera.com/evento"
+        placeholderTextColor="#64748B"
+        autoCapitalize="none"
+        autoCorrect={false}
+        keyboardType="url"
+        value={ticketUrl}
+        onChangeText={setTicketUrl}
+        accessibilityLabel="Enlace para comprar entradas"
+      />
+
+      <Text style={styles.label}>Venta de entradas de Hoy Salgo</Text>
+      <TouchableOpacity
+        style={[styles.ticketSalesToggle, ticketSalesEnabled && styles.ticketSalesToggleActive]}
+        onPress={() => setTicketSalesEnabled((enabled) => !enabled)}
+        accessibilityRole="switch"
+        accessibilityState={{ checked: ticketSalesEnabled }}
+      >
+        <Text style={styles.ticketSalesToggleText}>
+          {ticketSalesEnabled ? 'Activa · checkout de prueba dLocal' : 'Desactivada'}
+        </Text>
+      </TouchableOpacity>
+      <Text style={styles.ticketSalesHint}>
+        Para vender desde la app, configurá un precio en UYU y el cupo. Si usás una ticketera externa, dejá esta opción desactivada.
+      </Text>
+      <View style={styles.ticketFields}>
+        <View style={styles.ticketField}>
+          <Text style={styles.ticketFieldLabel}>Precio (UYU)</Text>
+          <TextInput
+            style={styles.input}
+            placeholder="Ej.: 350"
+            placeholderTextColor="#64748B"
+            keyboardType="decimal-pad"
+            value={ticketPrice}
+            onChangeText={setTicketPrice}
+            accessibilityLabel="Precio de la entrada en pesos uruguayos"
+          />
+        </View>
+        <View style={styles.ticketField}>
+          <Text style={styles.ticketFieldLabel}>Cupo total</Text>
+          <TextInput
+            style={styles.input}
+            placeholder="Ej.: 100"
+            placeholderTextColor="#64748B"
+            keyboardType="number-pad"
+            value={ticketCapacity}
+            onChangeText={setTicketCapacity}
+            accessibilityLabel="Cupo total de entradas"
+          />
+        </View>
+      </View>
+
       <Text style={styles.label}>Descripción</Text>
       <TextInput style={[styles.input, styles.textArea]} placeholder="Detalles, tragos 2x1..." placeholderTextColor="#64748B" multiline numberOfLines={3} value={description} onChangeText={setDescription} />
 
@@ -520,6 +714,20 @@ const styles = StyleSheet.create({
   input: { backgroundColor: '#1E293B', color: '#FFF', paddingHorizontal: 16, paddingVertical: 12, borderRadius: 8, fontSize: 15, marginBottom: 14, borderWidth: 1, borderColor: '#334155' },
   inputError: { borderColor: '#FB7185' },
   instagramError: { color: '#FDA4AF', fontSize: 12, marginTop: -8, marginBottom: 12 },
+  ticketSalesToggle: {
+    backgroundColor: '#1E293B',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#334155',
+    padding: 14,
+    marginBottom: 8,
+  },
+  ticketSalesToggleActive: { backgroundColor: '#14352E', borderColor: '#34D399' },
+  ticketSalesToggleText: { color: '#E2E8F0', fontSize: 14, fontWeight: '700' },
+  ticketSalesHint: { color: '#94A3B8', fontSize: 12, lineHeight: 18, marginBottom: 10 },
+  ticketFields: { flexDirection: 'row', gap: 10 },
+  ticketField: { flex: 1 },
+  ticketFieldLabel: { color: '#CBD5E1', fontSize: 12, marginBottom: 6 },
   textArea: { height: 80, textAlignVertical: 'top' },
   chipScrollView: { marginBottom: 14, flexDirection: 'row' },
   chip: { backgroundColor: '#1E293B', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, marginRight: 8, borderWidth: 1, borderColor: '#334155' },

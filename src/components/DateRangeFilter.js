@@ -40,7 +40,6 @@ export default function DateRangeFilter({ fromDate, toDate, onChange }) {
       value: type === 'from' ? from || to || today : to || from || today,
       mode: 'date',
       minimumDate: type === 'to' && from ? from : today,
-      maximumDate: type === 'from' ? to || undefined : undefined,
       onValueChange: (_event, selectedDate) => updateDate(type, selectedDate),
     });
   };
@@ -85,7 +84,6 @@ export default function DateRangeFilter({ fromDate, toDate, onChange }) {
             value={activePickerDate}
             mode="date"
             minimumDate={activePicker === 'to' && from ? from : today}
-            maximumDate={activePicker === 'from' ? to || undefined : undefined}
             onValueChange={(_event, selectedDate) => updateDate(activePicker, selectedDate)}
             onDismiss={() => setActivePicker(null)}
           />

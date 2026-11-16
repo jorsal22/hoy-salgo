@@ -61,7 +61,7 @@ function AdCard({ ad }) {
 
     try {
       await Linking.openURL(`https://wa.me/59891820141?text=${message}`);
-    } catch (error) {
+    } catch (_error) {
       Alert.alert('Error', 'Intentá de nuevo.');
     }
   };
@@ -118,7 +118,7 @@ export default function AdBannerCarousel({ ads }) {
       await Linking.openURL(
         `https://wa.me/59891820141?text=${message}`
       );
-    } catch (error) {
+    } catch (_error) {
       Alert.alert('Error', 'No se pudo abrir WhatsApp. Intentá de nuevo.');
     }
   };

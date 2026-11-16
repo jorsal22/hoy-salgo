@@ -1,9 +1,10 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
-  Clipboard,
   FlatList,
   Linking,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
@@ -12,17 +13,42 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { isAdminUser } from '../config/admin';
+import InstagramButton from '../components/InstagramButton';
+import TicketSalesInquiryButton from '../components/TicketSalesInquiryButton';
+import { supabase } from '../config/supabase';
+import { recordTicketClick } from '../services/analyticsService';
+import { getDataBankTicketEntries, getEventPriceDetails } from '../services/dataBankTicketService';
+import { filterUpcomingEvents, formatEventDate, getEventExpiryTimestamp } from '../services/eventDateService';
+import {
+  filterVerifiedEvents,
+  isBatchVerifiableEvent,
+  normalizeVerificationSourceUrl,
+} from '../services/eventVerificationService';
+import { normalizeInstagramUrl } from '../services/instagramService';
+import { getTicketShareLine, normalizeTicketUrl, openTrackedTicketUrl } from '../services/ticketUrlService';
+import useCurrentTime from '../hooks/useCurrentTime';
 
-// Emojis por categoría
 const CATEGORY_EMOJI = {
-  'Boliche': '🪩',
-  'Electrónica': '🎛️',
+  Boliche: '🪩',
+  Electrónica: '🎛️',
   'Cumbia / RKT': '🎺',
   'Pub / Bar': '🍺',
   'Fiesta Retro': '📼',
   'Rock / En Vivo': '🎸',
 };
+
 const getEmoji = (category) => CATEGORY_EMOJI[category] || '✦';
+
+const getDataBankErrorMessage = (error) => {
+  if (['42703', 'PGRST204'].includes(error?.code)) {
+    return 'Falta aplicar la migración de verificación de eventos en Supabase.';
+  }
+  if (['42P01', 'PGRST205'].includes(error?.code)) {
+    return 'Faltan aplicar migraciones de la base de datos en Supabase.';
+  }
+  return error?.message || 'No se pudieron cargar los datos.';
+};
 
 const shareWhatsApp = async (text) => {
   const url = `whatsapp://send?text=${encodeURIComponent(text)}`;
@@ -32,737 +58,125 @@ const shareWhatsApp = async (text) => {
     } else {
       Alert.alert('WhatsApp no está instalado', 'Instalá WhatsApp para compartir.');
     }
-  } catch {
-    Alert.alert('Error', 'No se pudo abrir WhatsApp.');
+  } catch (error) {
+    Alert.alert('Error', error.message || 'No se pudo abrir WhatsApp.');
   }
 };
 
-// ─── BANCO DE DATOS ──────────────────────────────────────────────────────────
+const loadEvents = async (isAdmin) => {
+  const pageSize = 500;
+  const events = [];
+  for (let offset = 0; ; offset += pageSize) {
+    let query = supabase
+      .from('events')
+      .select('id, title, venue_name, city, neighborhood, category, age_range, instagram_url, description, event_date, event_end_date, ticket_url, ticket_sales_enabled, ticket_price_uyu, club_id, verification_status, verification_source_url, verified_at')
+      .order('event_date', { ascending: true })
+      .order('id', { ascending: true });
+    if (!isAdmin) query = query.eq('verification_status', 'verified');
+    const { data, error } = await query.range(offset, offset + pageSize - 1);
+    if (error) throw error;
+    const page = data || [];
+    events.push(...page);
+    if (page.length < pageSize) break;
+  }
+  const invalidDates = events.filter((event) => getEventExpiryTimestamp(event.event_date, event.event_end_date) === null).length;
+  if (invalidDates) {
+    console.warn(`Banco de Datos: ${invalidDates} eventos sin fecha válida no se mostrarán.`);
+  }
+  return events;
+};
 
-const CLUBS_DATA = [
-  // ── MONTEVIDEO ──
-  {
-    id: 'c1',
-    name: 'Lola Mora',
-    city: 'Montevideo',
-    neighborhood: 'Ciudad Vieja',
-    address: 'Pérez Castellano 1518',
-    phone: '+59899123456',
-    instagram: '@lolamorabar',
-    category: 'Boliche',
-    description: 'Boliche emblemático en Ciudad Vieja. Música electrónica y cocktails.',
-  },
-  {
-    id: 'c2',
-    name: 'Club Chocolate',
-    city: 'Montevideo',
-    neighborhood: 'Palermo',
-    address: 'Wilson Ferreira Aldunate 1234',
-    phone: '+59898234567',
-    instagram: '@clubchocolatemvd',
-    category: 'Electrónica',
-    description: 'Dance music, DJs internacionales, pista enorme con sonido Funktion-One.',
-  },
-  {
-    id: 'c3',
-    name: 'Pony Pisador',
-    city: 'Montevideo',
-    neighborhood: 'Palermo',
-    address: 'Juan Paullier 1182',
-    phone: '+59898345678',
-    instagram: '@ponypísador',
-    category: 'Pub / Bar',
-    description: 'Bar de culto montevideano. Rock nacional, birras artesanales y buena onda.',
-  },
-  {
-    id: 'c4',
-    name: 'Shannon Irish Pub',
-    city: 'Montevideo',
-    neighborhood: 'Pocitos',
-    address: 'Benito Blanco 640',
-    phone: '+59899456789',
-    instagram: '@shannonmvd',
-    category: 'Pub / Bar',
-    description: 'Pub irlandés clásico. Música en vivo los viernes y sábados.',
-  },
-  {
-    id: 'c5',
-    name: 'Club Muta',
-    city: 'Montevideo',
-    neighborhood: 'Aguada',
-    address: 'Canelones 1337',
-    phone: '+59898567890',
-    instagram: '@clubmuta',
-    category: 'Electrónica',
-    description: 'Espacio underground de electrónica y arte. Fiestas temáticas semanales.',
-  },
-  {
-    id: 'c6',
-    name: 'La Ronda',
-    city: 'Montevideo',
-    neighborhood: 'Cordón',
-    address: '18 de Julio 1878',
-    phone: '+59899678901',
-    instagram: '@larondamvd',
-    category: 'Boliche',
-    description: 'Boliche multisala con cumbia, reggaeton y electrónica.',
-  },
-  {
-    id: 'c7',
-    name: 'Kitsch',
-    city: 'Montevideo',
-    neighborhood: 'Palermo',
-    address: 'Juan Paullier 1198',
-    phone: '+59898789012',
-    instagram: '@kitschmvd',
-    category: 'Boliche',
-    description: 'Boliche LGBTQ+ friendly. Estética pop, dragqueens y música variada.',
-  },
-  {
-    id: 'c8',
-    name: 'Club Brava',
-    city: 'Montevideo',
-    neighborhood: 'Buceo',
-    address: 'Rambla Rep. de México 5100',
-    phone: '+59899890123',
-    instagram: '@clubbravamvd',
-    category: 'Boliche',
-    description: 'Boliche frente al mar. Reguetón, RKT y cumbia toda la noche.',
-  },
-  {
-    id: 'c9',
-    name: 'Opus Boite',
-    city: 'Montevideo',
-    neighborhood: 'Punta Carretas',
-    address: 'Solís 1456',
-    phone: '+59898901234',
-    instagram: '@opusboite',
-    category: 'Boliche',
-    description: 'Boliche premium. Dress code estricto, cócteles y música house.',
-  },
-  {
-    id: 'c10',
-    name: 'Cine Universitario',
-    city: 'Montevideo',
-    neighborhood: 'Cordón',
-    address: 'San Salvador 1958',
-    phone: '+59899012345',
-    instagram: '@cineuniversitario',
-    category: 'Rock / En Vivo',
-    description: 'Sala de conciertos histórica. Rock, folk y eventos culturales.',
-  },
-  {
-    id: 'c11',
-    name: 'Sala del Museo',
-    city: 'Montevideo',
-    neighborhood: 'Centro',
-    address: '25 de Mayo 568',
-    phone: '+59898023456',
-    instagram: '@saladelmuseo',
-    category: 'Rock / En Vivo',
-    description: 'Sala íntima para bandas emergentes y jazz.',
-  },
-  {
-    id: 'c12',
-    name: 'Aguanta Bar',
-    city: 'Montevideo',
-    neighborhood: 'Tres Cruces',
-    address: 'Bulevar Artigas 1902',
-    phone: '+59899134567',
-    instagram: '@aguantabar',
-    category: 'Cumbia / RKT',
-    description: 'El templo de la cumbia y el RKT en Montevideo.',
-  },
-  {
-    id: 'c13',
-    name: 'Café Misterio',
-    city: 'Montevideo',
-    neighborhood: 'Ciudad Vieja',
-    address: 'Costa Rica 1700',
-    phone: '+59898245678',
-    instagram: '@cafemisterio',
-    category: 'Pub / Bar',
-    description: 'Bar literario con noches de DJ y tragos de autor.',
-  },
-  {
-    id: 'c14',
-    name: 'Flamingo',
-    city: 'Montevideo',
-    neighborhood: 'Pocitos',
-    address: 'Av. Brasil 2820',
-    phone: '+59899356789',
-    instagram: '@flamingomvd',
-    category: 'Boliche',
-    description: 'Boliche trendy en Pocitos. Pop, electro y fiesta retro los jueves.',
-  },
-  {
-    id: 'c15',
-    name: 'Palacio Peñarol',
-    city: 'Montevideo',
-    neighborhood: 'La Blanqueada',
-    address: 'Gral. Eugenio Garzón 2068',
-    phone: '+59898467890',
-    instagram: '@palaciopeñarol',
-    category: 'Rock / En Vivo',
-    description: 'Sala grande para bandas y espectáculos en vivo.',
-  },
+const loadDataBankData = async (isAdmin) => {
+  const [clubsResult, eventsResult] = await Promise.all([
+    supabase
+      .from('clubs')
+      .select('id, name, city, neighborhood, address, phone, instagram_url')
+      .eq('verification_status', 'verified')
+      .order('name', { ascending: true }),
+    loadEvents(isAdmin),
+  ]);
 
-  // ── PUNTA DEL ESTE ──
-  {
-    id: 'c16',
-    name: 'OVO Beach Club',
-    city: 'Punta del Este',
-    neighborhood: 'Playa Brava',
-    address: 'Rambla Lorenzo Batlle Pacheco s/n',
-    phone: '+59899567890',
-    instagram: '@ovobeachclub',
-    category: 'Boliche',
-    description: 'Beach club de temporada. Los mejores DJs internacionales en la arena.',
-  },
-  {
-    id: 'c17',
-    name: 'Moby Dick',
-    city: 'Punta del Este',
-    neighborhood: 'La Barra',
-    address: 'Ruta 10 km 161',
-    phone: '+59898678901',
-    instagram: '@mobydickpde',
-    category: 'Pub / Bar',
-    description: 'Bar de playa en La Barra. Atardeceres épicos y música electrónica.',
-  },
-  {
-    id: 'c18',
-    name: 'Tequila Club',
-    city: 'Punta del Este',
-    neighborhood: 'Mansa',
-    address: 'Av. Roosevelt 345',
-    phone: '+59899789012',
-    instagram: '@tequilaclubpde',
-    category: 'Boliche',
-    description: 'Club nocturno clásico de Punta. Reggaeton y house music.',
-  },
-  {
-    id: 'c19',
-    name: 'Club del Lago',
-    city: 'Punta del Este',
-    neighborhood: 'Punta del Este Centro',
-    address: 'Rambla Williman s/n',
-    phone: '+59898890123',
-    instagram: '@clubdellago',
-    category: 'Electrónica',
-    description: 'Boliche a orillas del lago. Electrónica y deep house toda la temporada.',
-  },
-  {
-    id: 'c20',
-    name: 'Nirvana Club',
-    city: 'Punta del Este',
-    neighborhood: 'Punta del Este Centro',
-    address: '20 y Gorlero',
-    phone: '+59899901234',
-    instagram: '@nirvanacpde',
-    category: 'Boliche',
-    description: 'Dos plantas, dos ambientes: electrónica arriba y reggaeton abajo.',
-  },
-  {
-    id: 'c21',
-    name: 'Jackie O',
-    city: 'Punta del Este',
-    neighborhood: 'Punta del Este Centro',
-    address: 'El Foque 850',
-    phone: '+59898012345',
-    instagram: '@jackieopde',
-    category: 'Boliche',
-    description: 'Uno de los boliches más antiguos de Punta. Clásico infaltable.',
-  },
-  {
-    id: 'c22',
-    name: 'Pacha Punta del Este',
-    city: 'Punta del Este',
-    neighborhood: 'Playa Mansa',
-    address: 'Rambla Williman 11',
-    phone: '+59899123450',
-    instagram: '@pachapde',
-    category: 'Electrónica',
-    description: 'Franquicia internacional de electrónica. DJs de clase mundial.',
-  },
+  if (clubsResult.error) throw clubsResult.error;
+  return {
+    clubs: (clubsResult.data || []).map((club) => ({
+      ...club,
+      instagram: club.instagram_url,
+    })),
+    events: (isAdmin ? eventsResult : filterVerifiedEvents(eventsResult)).map((event) => ({
+      ...event,
+      venue: event.venue_name,
+      ageRange: event.age_range,
+      instagram: event.instagram_url,
+    })),
+  };
+};
 
-  // ── CANELONES ──
-  {
-    id: 'c23',
-    name: 'Splash Beach',
-    city: 'Canelones',
-    neighborhood: 'Atlántida',
-    address: 'Av. Giannattasio km 45',
-    phone: '+59898234560',
-    instagram: '@splashbeachuruguay',
-    category: 'Boliche',
-    description: 'Beach club en Atlántida. Electrónica y reggaeton con vista al mar.',
-  },
-  {
-    id: 'c24',
-    name: 'Club Náutico Atlántida',
-    city: 'Canelones',
-    neighborhood: 'Atlántida',
-    address: 'Rambla costanera s/n',
-    phone: '+59899345670',
-    instagram: '@nauticoatlantida',
-    category: 'Boliche',
-    description: 'Fiestas de verano con vista a la costa.',
-  },
-  {
-    id: 'c25',
-    name: 'El Cambalache',
-    city: 'Canelones',
-    neighborhood: 'Las Piedras',
-    address: 'Av. Artigas 1234',
-    phone: '+59898456780',
-    instagram: '@elcambalache',
-    category: 'Cumbia / RKT',
-    description: 'Boliche cumbia en Las Piedras. Fiestas temáticas los fines de semana.',
-  },
-
-  // ── MALDONADO ──
-  {
-    id: 'c26',
-    name: 'Point Bar',
-    city: 'Maldonado',
-    neighborhood: 'Maldonado Centro',
-    address: '18 de Julio 890',
-    phone: '+59899567800',
-    instagram: '@pointbarmdo',
-    category: 'Pub / Bar',
-    description: 'Bar referente de Maldonado. Rock en vivo y música variada.',
-  },
-  {
-    id: 'c27',
-    name: 'Club Tropical',
-    city: 'Maldonado',
-    neighborhood: 'Piriápolis',
-    address: 'Rambla de los Argentinos 2200',
-    phone: '+59898678900',
-    instagram: '@clubtropicalpiri',
-    category: 'Boliche',
-    description: 'Boliche de verano en Piriápolis. Cumbia y reggaeton.',
-  },
-];
-
-const EVENTS_DATA = [
-  // ── EVENTOS MONTEVIDEO ──
-  {
-    id: 'e1',
-    title: 'Noche Electrónica — Club Chocolate',
-    venue: 'Club Chocolate',
-    city: 'Montevideo',
-    neighborhood: 'Palermo',
-    category: 'Electrónica',
-    ageRange: '+18',
-    instagram: '@clubchocolatemvd',
-    description:
-      'Noche de techno y house con DJ residente + invitado sorpresa. Open bar 23h a 00h. Dress code: casual elegante.',
-  },
-  {
-    id: 'e2',
-    title: 'Cumbia y RKT — Aguanta Bar',
-    venue: 'Aguanta Bar',
-    city: 'Montevideo',
-    neighborhood: 'Tres Cruces',
-    category: 'Cumbia / RKT',
-    ageRange: '+18',
-    instagram: '@aguantabar',
-    description:
-      'La mejor cumbia santafesina y RKT de Montevideo. Pista llena, 2x1 en cañas hasta medianoche.',
-  },
-  {
-    id: 'e3',
-    title: 'Fiesta Retro 80s & 90s — Flamingo',
-    venue: 'Flamingo',
-    city: 'Montevideo',
-    neighborhood: 'Pocitos',
-    category: 'Fiesta Retro',
-    ageRange: '+21',
-    instagram: '@flamingomvd',
-    description:
-      'Una noche de pura nostalgia. Michael Jackson, Madonna, Nirvana y los hits que formaron una generación.',
-  },
-  {
-    id: 'e4',
-    title: 'Rock Nacional en Vivo — Pony Pisador',
-    venue: 'Pony Pisador',
-    city: 'Montevideo',
-    neighborhood: 'Palermo',
-    category: 'Rock / En Vivo',
-    ageRange: '+18',
-    instagram: '@ponypísador',
-    description: 'Tres bandas de rock nacional. Puertas 21h, primer banda 22h. Entrada: $200.',
-  },
-  {
-    id: 'e5',
-    title: 'Underground Rave — Club Muta',
-    venue: 'Club Muta',
-    city: 'Montevideo',
-    neighborhood: 'Aguada',
-    category: 'Electrónica',
-    ageRange: '+18',
-    instagram: '@clubmuta',
-    description:
-      'Rave underground de 24 horas. Techno, industrial y ambient. BYOB permitido. Espacio seguro.',
-  },
-  {
-    id: 'e6',
-    title: 'Noche Kitsch — Drag & Pop',
-    venue: 'Kitsch',
-    city: 'Montevideo',
-    neighborhood: 'Palermo',
-    category: 'Boliche',
-    ageRange: '+18',
-    instagram: '@kitschmvd',
-    description:
-      'Show de drag queens, karaoke pop y DJ con hits del momento. Ambiente inclusivo y sin dress code.',
-  },
-  {
-    id: 'e7',
-    title: 'House Music en la Rambla — Club Brava',
-    venue: 'Club Brava',
-    city: 'Montevideo',
-    neighborhood: 'Buceo',
-    category: 'Boliche',
-    ageRange: '+21',
-    instagram: '@clubbravamvd',
-    description:
-      'Noche house con vista al mar. DJ set de 4 horas. Tragos de autor y botella en mesa.',
-  },
-  {
-    id: 'e8',
-    title: 'Black Party — Opus Boite',
-    venue: 'Opus Boite',
-    city: 'Montevideo',
-    neighborhood: 'Punta Carretas',
-    category: 'Boliche',
-    ageRange: '+25',
-    instagram: '@opusboite',
-    description:
-      'La fiesta más exclusiva del mes. Dress code: todo de negro. Botellas de champagne y atención personalizada.',
-  },
-  {
-    id: 'e9',
-    title: 'Noche Tropical — La Ronda',
-    venue: 'La Ronda',
-    city: 'Montevideo',
-    neighborhood: 'Cordón',
-    category: 'Cumbia / RKT',
-    ageRange: '+18',
-    instagram: '@larondamvd',
-    description:
-      'Tropical, RKT y merengue. Sala 1: cumbia. Sala 2: electrónica. ¡Noche entera con una sola entrada!',
-  },
-  {
-    id: 'e10',
-    title: 'Jazz & Vino — Café Misterio',
-    venue: 'Café Misterio',
-    city: 'Montevideo',
-    neighborhood: 'Ciudad Vieja',
-    category: 'Rock / En Vivo',
-    ageRange: '+21',
-    instagram: '@cafemisterio',
-    description:
-      'Cuarteto de jazz en vivo, maridaje de vinos uruguayos. Reserva anticipada recomendada.',
-  },
-  {
-    id: 'e11',
-    title: 'Fiesta de Disfraces Halloween — Lola Mora',
-    venue: 'Lola Mora',
-    city: 'Montevideo',
-    neighborhood: 'Ciudad Vieja',
-    category: 'Boliche',
-    ageRange: '+18',
-    instagram: '@lolamorabar',
-    description:
-      'La fiesta de Halloween más loca de la ciudad. Premio al mejor disfraz: $5000. Entrada con disfraz: descuento.',
-  },
-  {
-    id: 'e12',
-    title: 'Ladies Night — Shannon Irish Pub',
-    venue: 'Shannon Irish Pub',
-    city: 'Montevideo',
-    neighborhood: 'Pocitos',
-    category: 'Pub / Bar',
-    ageRange: '+18',
-    instagram: '@shannonmvd',
-    description: 'Miércoles de ladies night. Mujeres: tragos gratis hasta las 23h. DJ pop & hits.',
-  },
-  {
-    id: 'e13',
-    title: 'Show En Vivo — Palacio Peñarol',
-    venue: 'Palacio Peñarol',
-    city: 'Montevideo',
-    neighborhood: 'La Blanqueada',
-    category: 'Rock / En Vivo',
-    ageRange: '+18',
-    instagram: '@palaciopeñarol',
-    description:
-      'Noche de bandas emergentes uruguayas. 4 bandas, 4 géneros. Entrada colaborativa $150.',
-  },
-  {
-    id: 'e14',
-    title: 'Fiesta Universitaria — Sala del Museo',
-    venue: 'Sala del Museo',
-    city: 'Montevideo',
-    neighborhood: 'Centro',
-    category: 'Boliche',
-    ageRange: '+18',
-    instagram: '@saladelmuseo',
-    description:
-      'La fiesta universitaria del semestre. Pulsera incluye: tragos, entrada y sorteo de premios.',
-  },
-  {
-    id: 'e15',
-    title: 'Reggaeton Night — Club Brava',
-    venue: 'Club Brava',
-    city: 'Montevideo',
-    neighborhood: 'Buceo',
-    category: 'Boliche',
-    ageRange: '+18',
-    instagram: '@clubbravamvd',
-    description:
-      'Noche 100% reggaeton con los mejores hits de Bad Bunny, Karol G y Daddy Yankee. DJ invitado especial.',
-  },
-
-  // ── EVENTOS PUNTA DEL ESTE ──
-  {
-    id: 'e16',
-    title: 'Opening de Temporada — OVO Beach Club',
-    venue: 'OVO Beach Club',
-    city: 'Punta del Este',
-    neighborhood: 'Playa Brava',
-    category: 'Electrónica',
-    ageRange: '+18',
-    instagram: '@ovobeachclub',
-    description:
-      'El evento que abre la temporada en Punta. DJ internacional de talla mundial. Dresscode: blanco.',
-  },
-  {
-    id: 'e17',
-    title: 'Sunset Sessions — Moby Dick',
-    venue: 'Moby Dick',
-    city: 'Punta del Este',
-    neighborhood: 'La Barra',
-    category: 'Electrónica',
-    ageRange: '+21',
-    instagram: '@mobydickpde',
-    description:
-      'DJ set al atardecer desde las 18h. House y deep house con vista al océano. Capacidad limitada.',
-  },
-  {
-    id: 'e18',
-    title: 'Noche Latina — Tequila Club',
-    venue: 'Tequila Club',
-    city: 'Punta del Este',
-    neighborhood: 'Mansa',
-    category: 'Cumbia / RKT',
-    ageRange: '+18',
-    instagram: '@tequilaclubpde',
-    description:
-      'Salsa, merengue, bachata y reggaeton toda la noche. Show de bailarines profesionales a medianoche.',
-  },
-  {
-    id: 'e19',
-    title: 'Pacha Opening Night',
-    venue: 'Pacha Punta del Este',
-    city: 'Punta del Este',
-    neighborhood: 'Playa Mansa',
-    category: 'Electrónica',
-    ageRange: '+21',
-    instagram: '@pachapde',
-    description:
-      'La apertura de Pacha Uruguay. DJ residente europeo. VIP table con servicio premium.',
-  },
-  {
-    id: 'e20',
-    title: 'Fiesta Blanca — Jackie O',
-    venue: 'Jackie O',
-    city: 'Punta del Este',
-    neighborhood: 'Punta del Este Centro',
-    category: 'Boliche',
-    ageRange: '+21',
-    instagram: '@jackieopde',
-    description:
-      'La fiesta blanca más esperada del verano. Dresscode obligatorio: todo blanco. Botellas de champagne desde las 23h.',
-  },
-  {
-    id: 'e21',
-    title: 'Electro Night — Club del Lago',
-    venue: 'Club del Lago',
-    city: 'Punta del Este',
-    neighborhood: 'Punta del Este Centro',
-    category: 'Electrónica',
-    ageRange: '+18',
-    instagram: '@clubdellago',
-    description:
-      'Electrónica y techno a orillas del lago. Visualmente impresionante con mapping y luces láser.',
-  },
-  {
-    id: 'e22',
-    title: 'Nirvana All Night — Nirvana Club',
-    venue: 'Nirvana Club',
-    city: 'Punta del Este',
-    neighborhood: 'Punta del Este Centro',
-    category: 'Boliche',
-    ageRange: '+18',
-    instagram: '@nirvanacpde',
-    description:
-      'Dos pisos: electrónica arriba, perreo abajo. DJ invitado de Buenos Aires. Puertas 00h.',
-  },
-
-  // ── EVENTOS CANELONES ──
-  {
-    id: 'e23',
-    title: 'Fiesta de Verano — Splash Beach',
-    venue: 'Splash Beach',
-    city: 'Canelones',
-    neighborhood: 'Atlántida',
-    category: 'Boliche',
-    ageRange: '+18',
-    instagram: '@splashbeachuruguay',
-    description:
-      'Electrónica y reggaeton con pies en la arena. Acceso desde la rambla. Estacionamiento gratuito.',
-  },
-  {
-    id: 'e24',
-    title: 'Noche de Cumbia — El Cambalache',
-    venue: 'El Cambalache',
-    city: 'Canelones',
-    neighborhood: 'Las Piedras',
-    category: 'Cumbia / RKT',
-    ageRange: '+18',
-    instagram: '@elcambalache',
-    description:
-      'Cumbia villera, rancherita y RKT. 3 salas. Combinación desde Montevideo a las 22h.',
-  },
-
-  // ── EVENTOS MALDONADO ──
-  {
-    id: 'e25',
-    title: 'Rock Viernes — Point Bar',
-    venue: 'Point Bar',
-    city: 'Maldonado',
-    neighborhood: 'Maldonado Centro',
-    category: 'Rock / En Vivo',
-    ageRange: '+18',
-    instagram: '@pointbarmdo',
-    description:
-      'Viernes de rock en vivo con bandas locales. Pinta, buena gente y rock uruguayo de calidad.',
-  },
-  {
-    id: 'e26',
-    title: 'Fiesta de Piriápolis — Club Tropical',
-    venue: 'Club Tropical',
-    city: 'Maldonado',
-    neighborhood: 'Piriápolis',
-    category: 'Boliche',
-    ageRange: '+18',
-    instagram: '@clubtropicalpiri',
-    description:
-      'La gran fiesta costera de Piriápolis. Música tropical, electrónica y cumbia. Combo cena + entrada.',
-  },
-
-  // ── EVENTOS EXTRA ──
-  {
-    id: 'e27',
-    title: 'Fiesta Neon — Lola Mora',
-    venue: 'Lola Mora',
-    city: 'Montevideo',
-    neighborhood: 'Ciudad Vieja',
-    category: 'Boliche',
-    ageRange: '+18',
-    instagram: '@lolamorabar',
-    description:
-      'Pintá tu cuerpo con pintura fluorescente y brillá en la pista. Kit de pintura incluido en la entrada.',
-  },
-  {
-    id: 'e28',
-    title: 'Jueves Estudiantil — La Ronda',
-    venue: 'La Ronda',
-    city: 'Montevideo',
-    neighborhood: 'Cordón',
-    category: 'Boliche',
-    ageRange: '+18',
-    instagram: '@larondamvd',
-    description:
-      'El jueves más barato de Montevideo. Entrada $100, trago $80. Promo para estudiantes con credencial.',
-  },
-  {
-    id: 'e29',
-    title: 'Apertura de Temporada Punta 2025',
-    venue: 'OVO Beach Club',
-    city: 'Punta del Este',
-    neighborhood: 'Playa Brava',
-    category: 'Electrónica',
-    ageRange: '+21',
-    instagram: '@ovobeachclub',
-    description:
-      'El evento que todos esperan para inaugurar el verano. Capacidad: 2000 personas. Venta anticipada obligatoria.',
-  },
-  {
-    id: 'e30',
-    title: 'Noche de Folklore — Cine Universitario',
-    venue: 'Cine Universitario',
-    city: 'Montevideo',
-    neighborhood: 'Cordón',
-    category: 'Rock / En Vivo',
-    ageRange: '+18',
-    instagram: '@cineuniversitario',
-    description:
-      'Homenaje al folklore rioplatense. Murga, candombe y milonga. Entrada: $300 anticipada, $400 en puerta.',
-  },
-];
-
-
-
-// ─── COMPONENTE COPIADOR ─────────────────────────────────────────────────────
-
-function CopyButton({ value, label = '' }) {
-  const [copied, setCopied] = useState(false);
-
-  const handleCopy = useCallback(() => {
-    Clipboard.setString(value);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  }, [value]);
-
-  return (
-    <TouchableOpacity
-      accessibilityRole="button"
-      accessibilityLabel={`Copiar ${label}`}
-      onPress={handleCopy}
-      style={[styles.copyButton, copied && styles.copyButtonDone]}
-    >
-      <Text style={[styles.copyButtonText, copied && styles.copyButtonTextDone]}>
-        {copied ? '✓ Copiado' : 'Copiar'}
-      </Text>
-    </TouchableOpacity>
-  );
-}
-
-// ─── CAMPO COPIABLE ──────────────────────────────────────────────────────────
-
-function CopyField({ label, value }) {
-  if (!value) return null;
+function DataField({ label, value }) {
+  if (value === null || value === undefined || value === '') return null;
   return (
     <View style={styles.fieldRow}>
-      <View style={styles.fieldMeta}>
-        <Text style={styles.fieldLabel}>{label}</Text>
-        <Text style={styles.fieldValue}>{value}</Text>
-      </View>
-      <CopyButton value={value} label={label} />
+      <Text style={styles.fieldLabel}>{label}</Text>
+      <Text style={styles.fieldValue}>{String(value)}</Text>
     </View>
   );
 }
 
-// ─── TARJETA DE BOLICHE ───────────────────────────────────────────────────────
+function ShareButton({ text }) {
+  return (
+    <View style={styles.quickActions}>
+      <TouchableOpacity
+        style={styles.quickActionBtn}
+        onPress={() => shareWhatsApp(text)}
+        accessibilityRole="button"
+      >
+        <Text style={styles.quickActionText}>📤 WhatsApp</Text>
+      </TouchableOpacity>
+    </View>
+  );
+}
 
-function ClubCard({ item, onUseForEvent }) {
+function TicketButton({ event }) {
+  const ticketUrl = normalizeTicketUrl(event.ticket_url);
+  const priceDetails = getEventPriceDetails(event);
+
+  const handlePress = async () => {
+    if (!ticketUrl) {
+      Alert.alert('Precio y condiciones', `${priceDetails}\n\nNo hay enlace de compra disponible.`);
+      return;
+    }
+
+    try {
+      await openTrackedTicketUrl(ticketUrl, event.id, (url) => Linking.openURL(url), recordTicketClick);
+    } catch (error) {
+      Alert.alert('No se pudo abrir la ticketera', error.message || 'Revisá tu conexión e intentá de nuevo.');
+    }
+  };
+
+  return (
+    <>
+      <TouchableOpacity
+        accessibilityRole="button"
+        accessibilityLabel={`${ticketUrl ? 'Abrir entradas de' : 'Ver precio de'} ${event.title}`}
+        onPress={handlePress}
+        style={styles.ticketButton}
+      >
+        <Text style={styles.ticketButtonText}>{ticketUrl ? '🎟 Ver entradas' : '🎟 Ver precio'}</Text>
+      </TouchableOpacity>
+      <TicketSalesInquiryButton event={{
+        title: event.title,
+        date: event.event_date,
+        venue: event.venue_name,
+        city: event.city,
+        description: event.description,
+        ticketUrl: event.ticket_url,
+        ticketSalesEnabled: event.ticket_sales_enabled,
+      }} />
+    </>
+  );
+}
+
+function ClubCard({ item }) {
   const [expanded, setExpanded] = useState(false);
-
   const fullText = [
     `🏠 ${item.name}`,
     `Ciudad: ${item.city}`,
@@ -770,7 +184,6 @@ function ClubCard({ item, onUseForEvent }) {
     item.address && `Dirección: ${item.address}`,
     item.phone && `Teléfono: ${item.phone}`,
     item.instagram && `Instagram: ${item.instagram}`,
-    item.description && `Descripción: ${item.description}`,
   ]
     .filter(Boolean)
     .join('\n');
@@ -779,7 +192,8 @@ function ClubCard({ item, onUseForEvent }) {
     <View style={styles.card}>
       <TouchableOpacity
         accessibilityRole="button"
-        onPress={() => setExpanded((v) => !v)}
+        accessibilityState={{ expanded }}
+        onPress={() => setExpanded((value) => !value)}
         style={styles.cardHeader}
         activeOpacity={0.75}
       >
@@ -788,78 +202,89 @@ function ClubCard({ item, onUseForEvent }) {
         </View>
         <View style={styles.cardTitleBlock}>
           <Text style={styles.cardTitle}>{item.name}</Text>
-          <Text style={styles.cardSub}>{[item.neighborhood, item.city].filter(Boolean).join(' · ')}</Text>
-          <Text style={styles.cardCategory}>{item.category}</Text>
+          <Text style={styles.cardSub}>
+            {[item.neighborhood, item.city].filter(Boolean).join(' · ')}
+          </Text>
         </View>
-        <View style={styles.cardHeaderRight}>
-          <CopyButton value={fullText} label={`datos de ${item.name}`} />
-          <Text style={styles.cardChevron}>{expanded ? '▲' : '▼'}</Text>
-        </View>
+        <Text style={styles.cardChevron}>{expanded ? '▲' : '▼'}</Text>
       </TouchableOpacity>
 
       {expanded ? (
         <View style={styles.cardBody}>
-          <CopyField label="Nombre" value={item.name} />
-          <CopyField label="Ciudad" value={item.city} />
-          <CopyField label="Barrio" value={item.neighborhood} />
-          <CopyField label="Dirección" value={item.address} />
-          <CopyField label="Teléfono" value={item.phone} />
-          <CopyField label="Instagram" value={item.instagram} />
-          <CopyField label="Categoría" value={item.category} />
-          <CopyField label="Descripción" value={item.description} />
-          <View style={styles.quickActions}>
-            <TouchableOpacity
-              style={styles.quickActionBtn}
-              onPress={() => shareWhatsApp(fullText)}
-              accessibilityRole="button"
-            >
-              <Text style={styles.quickActionText}>📤 WhatsApp</Text>
-            </TouchableOpacity>
-            {onUseForEvent ? (
-              <TouchableOpacity
-                style={[styles.quickActionBtn, styles.quickActionPrimary]}
-                onPress={() => onUseForEvent({
-                  venue: item.name,
-                  city: item.city,
-                  neighborhood: item.neighborhood,
-                  category: item.category,
-                  instagram: item.instagram,
-                })}
-                accessibilityRole="button"
-              >
-                <Text style={styles.quickActionPrimaryText}>⚡ Usar para evento</Text>
-              </TouchableOpacity>
-            ) : null}
-          </View>
+          <DataField label="Nombre" value={item.name} />
+          <DataField label="Ciudad" value={item.city} />
+          <DataField label="Barrio" value={item.neighborhood} />
+          <DataField label="Dirección" value={item.address} />
+          <DataField label="Teléfono" value={item.phone} />
+          {item.instagram && !normalizeInstagramUrl(item.instagram) ? (
+            <DataField label="Instagram" value="Perfil no disponible" />
+          ) : (
+            <InstagramButton value={item.instagram} label={item.name} />
+          )}
+          <Text style={styles.ticketEventsTitle}>PRÓXIMOS EVENTOS CON ENTRADAS O PRECIO</Text>
+          {item.ticketEvents.map((event) => (
+            <View key={event.id} style={styles.ticketEvent}>
+              <Text style={styles.ticketEventTitle}>{event.title}</Text>
+              <Text style={styles.ticketEventDate}>{formatEventDate(event.event_date)}</Text>
+              <TicketButton event={event} />
+            </View>
+          ))}
+          <ShareButton text={fullText} />
         </View>
       ) : null}
     </View>
   );
 }
 
-// ─── TARJETA DE EVENTO ────────────────────────────────────────────────────────
-
-function EventCard({ item, onUseForEvent }) {
+function EventCard({
+  item,
+  isAdmin,
+  isUpdating,
+  isSelected,
+  isBatchEligible,
+  onToggleSelection,
+  onVerificationChange,
+}) {
   const [expanded, setExpanded] = useState(false);
-
+  const [sourceUrl, setSourceUrl] = useState(item.verification_source_url || '');
   const fullText = [
     `🎉 ${item.title}`,
-    `Boliche / Local: ${item.venue}`,
+    item.event_date && `Fecha: ${formatEventDate(item.event_date)}`,
+    item.venue && `Boliche / Local: ${item.venue}`,
     `Ciudad: ${item.city}`,
     item.neighborhood && `Barrio: ${item.neighborhood}`,
-    `Categoría: ${item.category}`,
-    `Edad mínima: ${item.ageRange}`,
+    item.category && `Categoría: ${item.category}`,
+    item.ageRange && `Edad mínima: ${item.ageRange}`,
     item.instagram && `Instagram: ${item.instagram}`,
     item.description && `Descripción: ${item.description}`,
+    getTicketShareLine(item.ticket_url),
   ]
     .filter(Boolean)
     .join('\n');
 
   return (
     <View style={styles.card}>
+      {isAdmin && isBatchEligible ? (
+        <TouchableOpacity
+          accessibilityRole="checkbox"
+          accessibilityState={{ checked: isSelected }}
+          disabled={isUpdating}
+          onPress={() => onToggleSelection(item.id)}
+          style={[
+            styles.batchSelection,
+            isSelected && styles.batchSelectionActive,
+            isUpdating && styles.disabledButton,
+          ]}
+        >
+          <Text style={[styles.batchSelectionText, isSelected && styles.batchSelectionTextActive]}>
+            {isSelected ? '✓ Seleccionado para aprobar' : '＋ Seleccionar para aprobar'}
+          </Text>
+        </TouchableOpacity>
+      ) : null}
       <TouchableOpacity
         accessibilityRole="button"
-        onPress={() => setExpanded((v) => !v)}
+        accessibilityState={{ expanded }}
+        onPress={() => setExpanded((value) => !value)}
         style={styles.cardHeader}
         activeOpacity={0.75}
       >
@@ -868,75 +293,271 @@ function EventCard({ item, onUseForEvent }) {
         </View>
         <View style={styles.cardTitleBlock}>
           <Text style={styles.cardTitle}>{item.title}</Text>
-          <Text style={styles.cardSub}>{item.venue} · {item.city}</Text>
-          <Text style={styles.cardCategory}>{item.ageRange} · {item.category}</Text>
+          <Text style={styles.cardSub}>
+            {[item.venue, item.city].filter(Boolean).join(' · ')}
+          </Text>
+          <Text style={styles.cardCategory}>
+            {[item.event_date && formatEventDate(item.event_date), item.ageRange, item.category]
+              .filter(Boolean)
+              .join(' · ')}
+          </Text>
+          {isAdmin ? (
+            <Text style={styles.verificationBadge}>
+              {item.verification_status === 'verified' ? '✓ Verificado' : 'Pendiente de verificar'}
+            </Text>
+          ) : null}
         </View>
-        <View style={styles.cardHeaderRight}>
-          <CopyButton value={fullText} label={`datos de ${item.title}`} />
-          <Text style={styles.cardChevron}>{expanded ? '▲' : '▼'}</Text>
-        </View>
+        <Text style={styles.cardChevron}>{expanded ? '▲' : '▼'}</Text>
       </TouchableOpacity>
 
       {expanded ? (
         <View style={styles.cardBody}>
-          <CopyField label="Nombre del evento" value={item.title} />
-          <CopyField label="Boliche / Local" value={item.venue} />
-          <CopyField label="Ciudad" value={item.city} />
-          <CopyField label="Barrio" value={item.neighborhood} />
-          <CopyField label="Categoría" value={item.category} />
-          <CopyField label="Edad mínima" value={item.ageRange} />
-          <CopyField label="Instagram" value={item.instagram} />
-          <CopyField label="Descripción" value={item.description} />
-          <View style={styles.quickActions}>
-            <TouchableOpacity
-              style={styles.quickActionBtn}
-              onPress={() => shareWhatsApp(fullText)}
-              accessibilityRole="button"
-            >
-              <Text style={styles.quickActionText}>📤 WhatsApp</Text>
-            </TouchableOpacity>
-            {onUseForEvent ? (
+          <DataField label="Nombre del evento" value={item.title} />
+          <DataField label="Fecha y hora" value={item.event_date && formatEventDate(item.event_date)} />
+          <DataField label="Boliche / Local" value={item.venue} />
+          <DataField label="Ciudad" value={item.city} />
+          <DataField label="Barrio" value={item.neighborhood} />
+          <DataField label="Categoría" value={item.category} />
+          <DataField label="Edad mínima" value={item.ageRange} />
+          <DataField label="Instagram" value={item.instagram} />
+          <DataField label="Descripción" value={item.description} />
+          <TicketButton event={item} />
+          {isAdmin ? (
+            <View style={styles.verificationPanel}>
+              <Text style={styles.verificationTitle}>REVISIÓN Y VISIBILIDAD</Text>
+              <Text style={styles.verificationHint}>
+                {item.verification_status === 'verified'
+                  ? 'Este evento aparece en la cartelera pública.'
+                  : 'Seguirá oculto hasta aprobarlo. La fuente debe respaldar todos los datos visibles, incluida la edad y el enlace de entradas.'}
+              </Text>
+              {item.verification_status === 'verified' ? (
+                <DataField label="Fuente verificada" value={item.verification_source_url} />
+              ) : (
+                <TextInput
+                  accessibilityLabel="Enlace de la fuente pública del evento"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  editable={!isUpdating}
+                  keyboardType="url"
+                  onChangeText={setSourceUrl}
+                  placeholder="https://fuente-oficial-o-ticketera..."
+                  placeholderTextColor="#748198"
+                  style={styles.verificationInput}
+                  value={sourceUrl}
+                />
+              )}
               <TouchableOpacity
-                style={[styles.quickActionBtn, styles.quickActionPrimary]}
-                onPress={() => onUseForEvent({
-                  title: item.title,
-                  venue: item.venue,
-                  city: item.city,
-                  neighborhood: item.neighborhood,
-                  category: item.category,
-                  instagram: item.instagram,
-                  description: item.description,
-                })}
                 accessibilityRole="button"
+                disabled={isUpdating}
+                onPress={() => onVerificationChange(
+                  item.id,
+                  item.verification_status === 'verified' ? 'pending' : 'verified',
+                  sourceUrl
+                )}
+                style={[
+                  styles.verificationButton,
+                  item.verification_status === 'verified' && styles.pendingButton,
+                  isUpdating && styles.disabledButton,
+                ]}
               >
-                <Text style={styles.quickActionPrimaryText}>⚡ Usar este evento</Text>
+                <Text style={styles.verificationButtonText}>
+                  {isUpdating
+                    ? 'Guardando…'
+                    : item.verification_status === 'verified'
+                      ? 'Ocultar y dejar pendiente'
+                      : 'Aprobar y mostrar'}
+                </Text>
               </TouchableOpacity>
-            ) : null}
-          </View>
+            </View>
+          ) : null}
+          <ShareButton text={fullText} />
         </View>
       ) : null}
     </View>
   );
 }
 
-// ─── PANTALLA PRINCIPAL ───────────────────────────────────────────────────────
-
-export default function DataBankScreen({ onBack, isAdmin, isAuthenticated, onUseForEvent, onSignIn }) {
+export default function DataBankScreen({ onBack }) {
   const [activeTab, setActiveTab] = useState('Boliches');
   const [search, setSearch] = useState('');
+  const [searchFocused, setSearchFocused] = useState(false);
   const [cityFilter, setCityFilter] = useState('Todas');
+  const [clubs, setClubs] = useState([]);
+  const [events, setEvents] = useState([]);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [updatingEventId, setUpdatingEventId] = useState(null);
+  const [selectedEventIds, setSelectedEventIds] = useState([]);
+  const [isBatchUpdating, setIsBatchUpdating] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [errorMessage, setErrorMessage] = useState('');
+  const isMountedRef = useRef(false);
+  const currentTime = useCurrentTime();
 
-  const cities = useMemo(() => {
-    const src = activeTab === 'Boliches' ? CLUBS_DATA : EVENTS_DATA;
-    return ['Todas', ...new Set(src.map((item) => item.city))];
-  }, [activeTab]);
+  const refreshData = useCallback(async () => {
+    setLoading(true);
+    setErrorMessage('');
+
+    try {
+      const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+      if (sessionError) throw sessionError;
+      const userIsAdmin = isAdminUser(sessionData.session?.user);
+      const data = await loadDataBankData(userIsAdmin);
+      if (!isMountedRef.current) return;
+      setIsAdmin(userIsAdmin);
+      setClubs(data.clubs);
+      setEvents(data.events);
+      setSelectedEventIds([]);
+    } catch (error) {
+      if (isMountedRef.current) {
+        setErrorMessage(getDataBankErrorMessage(error));
+      }
+    } finally {
+      if (isMountedRef.current) setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    let isActive = true;
+    isMountedRef.current = true;
+
+    const loadInitialData = async () => {
+      const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+      if (sessionError) throw sessionError;
+      const userIsAdmin = isAdminUser(sessionData.session?.user);
+      if (isActive) setIsAdmin(userIsAdmin);
+      return loadDataBankData(userIsAdmin);
+    };
+
+    loadInitialData()
+      .then((data) => {
+        if (!isActive) return;
+        setClubs(data.clubs);
+        setEvents(data.events);
+      })
+      .catch((error) => {
+        if (isActive) {
+          setErrorMessage(getDataBankErrorMessage(error));
+        }
+      })
+      .finally(() => {
+        if (isActive) setLoading(false);
+      });
+
+    return () => {
+      isActive = false;
+      isMountedRef.current = false;
+    };
+  }, []);
+
+  const handleVerificationChange = useCallback(async (eventId, status, sourceUrl) => {
+    const source = normalizeVerificationSourceUrl(sourceUrl);
+    if (status === 'verified' && !source) {
+      Alert.alert(
+        'Fuente obligatoria',
+        'Pegá un enlace público seguro que empiece con https://.'
+      );
+      return;
+    }
+
+    setUpdatingEventId(eventId);
+    try {
+      const { data, error } = await supabase
+        .from('events')
+        .update({
+          verification_status: status,
+          verification_source_url: source,
+        })
+        .eq('id', eventId)
+        .select('id, verification_status, verification_source_url, verified_at')
+        .maybeSingle();
+
+      if (error) throw error;
+      if (!data) throw new Error('No se confirmó el cambio. Iniciá sesión con la cuenta administradora e intentá de nuevo.');
+
+      setEvents((current) => current.map((event) =>
+        event.id === eventId ? { ...event, ...data } : event
+      ));
+    } catch (error) {
+      Alert.alert(
+        'No se pudo actualizar la revisión',
+        error.message || 'Intentá de nuevo.'
+      );
+    } finally {
+      setUpdatingEventId(null);
+    }
+  }, []);
+
+  const handleBatchVerification = useCallback(async (selectedEvents) => {
+    const eligibleEvents = selectedEvents.filter((event) =>
+      isBatchVerifiableEvent(event, currentTime)
+    );
+    if (eligibleEvents.length !== selectedEvents.length) {
+      setSelectedEventIds([]);
+      Alert.alert(
+        'La selección cambió',
+        'Actualizá el Banco de Datos y volvé a seleccionar solo eventos futuros con fuente válida.'
+      );
+      return;
+    }
+
+    const eventIds = eligibleEvents.map((event) => event.id);
+    if (!eventIds.length) return;
+
+    setIsBatchUpdating(true);
+    try {
+      const { data, error } = await supabase
+        .from('events')
+        .update({ verification_status: 'verified' })
+        .in('id', eventIds)
+        .select('id, verification_status, verification_source_url, verified_at');
+
+      if (error) throw error;
+
+      const updatedEvents = data || [];
+      const updatedById = new Map(updatedEvents.map((event) => [event.id, event]));
+      setEvents((current) => current.map((event) =>
+        updatedById.has(event.id) ? { ...event, ...updatedById.get(event.id) } : event
+      ));
+      setSelectedEventIds((current) =>
+        current.filter((eventId) => !updatedById.has(eventId))
+      );
+
+      if (updatedEvents.length !== eventIds.length) {
+        Alert.alert(
+          'Revisión incompleta',
+          `Se confirmaron ${updatedEvents.length} de ${eventIds.length} eventos. Actualizá la lista para revisar el estado.`
+        );
+        return;
+      }
+
+      Alert.alert('Eventos aprobados', `Se aprobaron ${updatedEvents.length} eventos.`);
+    } catch (error) {
+      Alert.alert(
+        'No se pudo aprobar el lote',
+        error.message || 'Intentá de nuevo.'
+      );
+    } finally {
+      setIsBatchUpdating(false);
+    }
+  }, [currentTime]);
+
+  const upcomingEvents = useMemo(() => filterUpcomingEvents(events, currentTime), [events, currentTime]);
+  const ticketEntries = useMemo(
+    () => getDataBankTicketEntries(clubs, upcomingEvents),
+    [clubs, upcomingEvents]
+  );
+  const sourceData = activeTab === 'Boliches' ? ticketEntries.clubs : ticketEntries.events;
+  const cities = useMemo(
+    () => ['Todas', ...new Set(sourceData.map((item) => item.city).filter(Boolean))],
+    [sourceData]
+  );
+  const effectiveCityFilter = cities.includes(cityFilter) ? cityFilter : 'Todas';
 
   const filtered = useMemo(() => {
-    const src = activeTab === 'Boliches' ? CLUBS_DATA : EVENTS_DATA;
-    const q = search.trim().toLowerCase();
-    return src.filter((item) => {
-      const matchCity = cityFilter === 'Todas' || item.city === cityFilter;
-      if (!q) return matchCity;
+    const query = search.trim().toLowerCase();
+    return sourceData.filter((item) => {
+      const matchCity = effectiveCityFilter === 'Todas' || item.city === effectiveCityFilter;
+      if (!query) return matchCity;
       const haystack = [
         item.name || item.title,
         item.city,
@@ -944,91 +565,159 @@ export default function DataBankScreen({ onBack, isAdmin, isAuthenticated, onUse
         item.category,
         item.description,
         item.venue,
+        item.address,
+        item.instagram,
       ]
         .filter(Boolean)
         .join(' ')
         .toLowerCase();
-      return matchCity && haystack.includes(q);
+      return matchCity && haystack.includes(query);
     });
-  }, [activeTab, search, cityFilter]);
+  }, [sourceData, search, effectiveCityFilter]);
 
-  const copyAll = useCallback(() => {
-    const src = activeTab === 'Boliches' ? CLUBS_DATA : EVENTS_DATA;
-    const text = src
-      .map((item) =>
-        activeTab === 'Boliches'
-          ? [
-              `── ${item.name} ──`,
-              `Ciudad: ${item.city}`,
-              item.neighborhood && `Barrio: ${item.neighborhood}`,
-              item.address && `Dirección: ${item.address}`,
-              item.phone && `Teléfono: ${item.phone}`,
-              item.instagram && `Instagram: ${item.instagram}`,
-              item.description && `Descripción: ${item.description}`,
-            ]
-              .filter(Boolean)
-              .join('\n')
-          : [
-              `── ${item.title} ──`,
-              `Boliche: ${item.venue}`,
-              `Ciudad: ${item.city}`,
-              item.neighborhood && `Barrio: ${item.neighborhood}`,
-              `Categoría: ${item.category}`,
-              `Edad: ${item.ageRange}`,
-              item.instagram && `Instagram: ${item.instagram}`,
-              item.description && `Descripción: ${item.description}`,
-            ]
-              .filter(Boolean)
-              .join('\n')
-      )
-      .join('\n\n');
+  const batchEligibleEvents = useMemo(
+    () => isAdmin && activeTab === 'Eventos'
+      ? filtered.filter((event) => isBatchVerifiableEvent(event, currentTime))
+      : [],
+    [activeTab, currentTime, filtered, isAdmin]
+  );
+  const selectedBatchEvents = useMemo(
+    () => batchEligibleEvents.filter((event) => selectedEventIds.includes(event.id)),
+    [batchEligibleEvents, selectedEventIds]
+  );
+  const allEligibleEventsSelected = batchEligibleEvents.length > 0 &&
+    selectedBatchEvents.length === batchEligibleEvents.length;
 
-    Clipboard.setString(text);
-    Alert.alert('¡Copiado!', `Se copiaron todos los ${src.length} ${activeTab.toLowerCase()} al portapapeles.`);
-  }, [activeTab]);
+  const toggleEventSelection = useCallback((eventId) => {
+    setSelectedEventIds((current) => current.includes(eventId)
+      ? current.filter((id) => id !== eventId)
+      : [...current, eventId]);
+  }, []);
+
+  const toggleAllEligibleEvents = useCallback(() => {
+    const eligibleIds = batchEligibleEvents.map((event) => event.id);
+    setSelectedEventIds((current) => allEligibleEventsSelected
+      ? current.filter((id) => !eligibleIds.includes(id))
+      : [...new Set([...current, ...eligibleIds])]);
+  }, [allEligibleEventsSelected, batchEligibleEvents]);
+
+  const requestBatchVerification = useCallback(() => {
+    if (!selectedBatchEvents.length) return;
+    Alert.alert(
+      `Aprobar ${selectedBatchEvents.length} eventos`,
+      'Cada evento tiene fecha futura, datos básicos y una fuente HTTPS. Confirmá que la fuente sea oficial y respalde los datos antes de mostrarlos.',
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Aprobar lote',
+          onPress: () => handleBatchVerification(selectedBatchEvents),
+        },
+      ]
+    );
+  }, [handleBatchVerification, selectedBatchEvents]);
 
   const renderItem = useCallback(
-    ({ item }) =>
-      activeTab === 'Boliches'
-        ? <ClubCard item={item} onUseForEvent={onUseForEvent} />
-        : <EventCard item={item} onUseForEvent={onUseForEvent} />,
-    [activeTab, onUseForEvent]
+    ({ item }) => activeTab === 'Boliches'
+      ? <ClubCard item={item} />
+      : (
+        <EventCard
+          item={item}
+          isAdmin={isAdmin}
+          isUpdating={isBatchUpdating || updatingEventId === item.id}
+          isSelected={selectedEventIds.includes(item.id)}
+          isBatchEligible={isBatchVerifiableEvent(item, currentTime)}
+          onToggleSelection={toggleEventSelection}
+          onVerificationChange={handleVerificationChange}
+        />
+      ),
+    [
+      activeTab,
+      currentTime,
+      handleVerificationChange,
+      isAdmin,
+      isBatchUpdating,
+      selectedEventIds,
+      toggleEventSelection,
+      updatingEventId,
+    ]
   );
+
+  const renderEmptyState = () => {
+    if (loading && !sourceData.length) {
+      return (
+        <View style={styles.emptyState}>
+          <ActivityIndicator size="large" color="#FF5573" />
+          <Text style={styles.emptyHint}>Cargando datos actualizados…</Text>
+        </View>
+      );
+    }
+
+    if (errorMessage && !sourceData.length) {
+      return (
+        <View style={styles.errorState}>
+          <Text style={styles.emptyText}>No se pudo cargar el Banco de Datos</Text>
+          <Text style={styles.emptyHint}>{errorMessage}</Text>
+          <TouchableOpacity
+            accessibilityRole="button"
+            onPress={refreshData}
+            style={styles.retryButton}
+          >
+            <Text style={styles.retryButtonText}>Reintentar</Text>
+          </TouchableOpacity>
+        </View>
+      );
+    }
+
+    const hasRecords = sourceData.length > 0;
+    return (
+      <View style={styles.emptyState}>
+        <Text style={styles.emptyIcon}>✦</Text>
+        <Text style={styles.emptyText}>
+          {hasRecords
+            ? 'No encontramos resultados.'
+            : activeTab === 'Eventos'
+              ? 'No hay eventos próximos con entradas o precio.'
+              : 'No hay boliches con eventos próximos con entradas o precio.'}
+        </Text>
+        <Text style={styles.emptyHint}>
+          {hasRecords
+            ? 'Probá otro término o limpiá el buscador.'
+            : activeTab === 'Eventos'
+              ? 'Cuando haya información de entradas, aparecerá acá.'
+              : 'Cuando un boliche tenga un evento con entradas o precio, aparecerá acá.'}
+        </Text>
+      </View>
+    );
+  };
 
   return (
     <SafeAreaView style={styles.container}>
-      {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity
           accessibilityRole="button"
+          accessibilityLabel="Volver"
           onPress={onBack}
           style={styles.backButton}
         >
-          <Text style={styles.backText}>‹  Volver</Text>
+          <Text style={styles.backText}>‹</Text>
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Banco de Datos</Text>
+        <View style={styles.headerTitleBlock}>
+          <Text style={styles.eyebrow}>HOY SALGO · GUÍA LOCAL</Text>
+          <Text style={styles.headerTitle}>Banco de Datos</Text>
+        </View>
         <TouchableOpacity
           accessibilityRole="button"
-          accessibilityLabel="Copiar todos"
-          onPress={copyAll}
-          style={styles.copyAllButton}
+          accessibilityLabel="Actualizar datos"
+          onPress={refreshData}
+          style={styles.refreshButton}
+          disabled={loading || isBatchUpdating}
         >
-          <Text style={styles.copyAllText}>Copiar todo</Text>
+          {loading || isBatchUpdating
+            ? <ActivityIndicator size="small" color="#FF8195" />
+            : <Text style={styles.refreshIcon}>↻</Text>}
         </TouchableOpacity>
       </View>
 
-      {/* Banner admin */}
-      {isAuthenticated && onUseForEvent ? (
-        <View style={styles.adminBanner}>
-          <Text style={styles.adminBannerText}>{'⚡ Expandí una tarjeta y tocá "Usar para evento" para pre-cargar el formulario'}</Text>
-        </View>
-      ) : !isAuthenticated ? (
-        <TouchableOpacity style={styles.loginBanner} onPress={onSignIn}>
-          <Text style={styles.loginBannerText}>🔒 Iniciá sesión para usar los datos en el formulario</Text>
-        </TouchableOpacity>
-      ) : null}
-
-      {/* Tabs */}
       <View style={styles.tabRow}>
         {['Boliches', 'Eventos'].map((tab) => (
           <TouchableOpacity
@@ -1039,6 +728,7 @@ export default function DataBankScreen({ onBack, isAdmin, isAuthenticated, onUse
               setActiveTab(tab);
               setSearch('');
               setCityFilter('Todas');
+              setSelectedEventIds([]);
             }}
             style={[styles.tab, activeTab === tab && styles.tabActive]}
           >
@@ -1049,255 +739,461 @@ export default function DataBankScreen({ onBack, isAdmin, isAuthenticated, onUse
         ))}
       </View>
 
-      {/* Buscador */}
       <View style={styles.searchRow}>
-        <TextInput
-          style={styles.searchInput}
-          placeholder="Buscar por nombre, barrio, categoría…"
-          placeholderTextColor="#64748B"
-          value={search}
-          onChangeText={setSearch}
-          autoCapitalize="none"
-          returnKeyType="search"
-          clearButtonMode="while-editing"
-        />
+        <View style={[styles.searchBox, searchFocused && styles.searchBoxFocused]}>
+          <View style={styles.searchIcon} accessible={false}>
+            <View style={styles.searchIconLens} />
+            <View style={styles.searchIconHandle} />
+          </View>
+          <TextInput
+            style={styles.searchInput}
+            accessibilityLabel="Buscar por nombre, barrio o categoría"
+            placeholder="Nombre, barrio o categoría"
+            placeholderTextColor="#748198"
+            value={search}
+            onChangeText={(value) => {
+              setSearch(value);
+              setSelectedEventIds([]);
+            }}
+            onFocus={() => setSearchFocused(true)}
+            onBlur={() => setSearchFocused(false)}
+            autoCapitalize="none"
+            autoCorrect={false}
+            returnKeyType="search"
+            selectionColor="#FF5573"
+          />
+          {search.length > 0 ? (
+            <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityLabel="Limpiar búsqueda"
+              onPress={() => {
+                setSearch('');
+                setSelectedEventIds([]);
+              }}
+              style={styles.clearSearchButton}
+              hitSlop={8}
+            >
+              <Text style={styles.clearSearchText}>×</Text>
+            </TouchableOpacity>
+          ) : null}
+        </View>
       </View>
 
-      {/* Filtro por ciudad */}
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.cityChips}
-        keyboardShouldPersistTaps="handled"
-      >
-        {cities.map((c) => (
-          <TouchableOpacity
-            key={c}
-            accessibilityRole="button"
-            accessibilityState={{ selected: cityFilter === c }}
-            onPress={() => setCityFilter(c)}
-            style={[styles.cityChip, cityFilter === c && styles.cityChipActive]}
-          >
-            <Text style={[styles.cityChipText, cityFilter === c && styles.cityChipTextActive]}>
-              {c}
-            </Text>
-          </TouchableOpacity>
-        ))}
-      </ScrollView>
-
-      {/* Contador */}
-      <Text style={styles.counter}>
-        {filtered.length} {activeTab.toLowerCase()}
-        {search ? ` para "${search}"` : ''}
-      </Text>
-
-      {/* Lista */}
       <FlatList
+        style={styles.list}
         data={filtered}
-        keyExtractor={(item) => item.id}
+        keyExtractor={(item) => String(item.id)}
         renderItem={renderItem}
         contentContainerStyle={styles.listContent}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
-        ListEmptyComponent={
-          <View style={styles.emptyState}>
-            <Text style={styles.emptyIcon}>✦</Text>
-            <Text style={styles.emptyText}>No encontramos resultados.</Text>
-            <Text style={styles.emptyHint}>Probá otro término o limpiá el buscador.</Text>
+        ListHeaderComponent={
+          <View>
+            <Text style={styles.filterLabel}>FILTRAR POR CIUDAD</Text>
+            <ScrollView
+              horizontal
+              style={styles.cityScroll}
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.cityChips}
+              keyboardShouldPersistTaps="handled"
+            >
+              {cities.map((city) => (
+                <TouchableOpacity
+                  key={city}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: effectiveCityFilter === city }}
+                  onPress={() => {
+                    setSelectedEventIds([]);
+                    setCityFilter(city);
+                  }}
+                  style={[styles.cityChip, effectiveCityFilter === city && styles.cityChipActive]}
+                >
+                  <Text style={[styles.cityChipText, effectiveCityFilter === city && styles.cityChipTextActive]}>
+                    {city}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+            <View style={styles.counter}>
+              <Text style={styles.counterTitle}>RESULTADOS</Text>
+              <Text style={styles.counterValue}>
+                {filtered.length} {activeTab.toLowerCase()}
+                {search ? ` para "${search}"` : ''}
+              </Text>
+            </View>
+            {isAdmin && activeTab === 'Eventos' ? (
+              <View style={styles.batchPanel}>
+                <Text style={styles.batchTitle}>REVISIÓN EN LOTE</Text>
+                <Text style={styles.batchHint}>
+                  Solo se incluyen eventos futuros con fuente HTTPS, boliche asociado, ciudad y datos básicos. Confirmá que cada fuente sea oficial.
+                </Text>
+                <View style={styles.batchActions}>
+                  <TouchableOpacity
+                    accessibilityRole="button"
+                    disabled={!batchEligibleEvents.length || isBatchUpdating}
+                    onPress={toggleAllEligibleEvents}
+                    style={[
+                      styles.batchButton,
+                      styles.batchSelectButton,
+                      (!batchEligibleEvents.length || isBatchUpdating) && styles.disabledButton,
+                    ]}
+                  >
+                    <Text style={styles.batchButtonText}>
+                      {allEligibleEventsSelected
+                        ? 'Quitar selección'
+                        : `Seleccionar aptos (${batchEligibleEvents.length})`}
+                    </Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    accessibilityRole="button"
+                    disabled={!selectedBatchEvents.length || isBatchUpdating}
+                    onPress={requestBatchVerification}
+                    style={[
+                      styles.batchButton,
+                      styles.batchApproveButton,
+                      (!selectedBatchEvents.length || isBatchUpdating) && styles.disabledButton,
+                    ]}
+                  >
+                    {isBatchUpdating ? (
+                      <ActivityIndicator color="#FFF" size="small" />
+                    ) : (
+                      <Text style={styles.batchButtonText}>
+                        Aprobar lote ({selectedBatchEvents.length})
+                      </Text>
+                    )}
+                  </TouchableOpacity>
+                </View>
+                {!batchEligibleEvents.length ? (
+                  <Text style={styles.batchEmptyHint}>
+                    No hay eventos elegibles en estos resultados. Completá la fuente y los datos faltantes; los eventos viejos no se pueden aprobar en lote.
+                  </Text>
+                ) : null}
+              </View>
+            ) : null}
           </View>
         }
+        refreshControl={
+          <RefreshControl
+            refreshing={loading}
+            onRefresh={refreshData}
+            tintColor="#FF5573"
+            colors={['#FF5573']}
+          />
+        }
+        ListEmptyComponent={renderEmptyState}
       />
     </SafeAreaView>
   );
 }
 
-// ─── ESTILOS ─────────────────────────────────────────────────────────────────
-
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#0B1020' },
-
-  // Header
+  container: { flex: 1, backgroundColor: '#090D16' },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderBottomColor: '#1E2D44',
-    borderBottomWidth: 1,
+    paddingHorizontal: 18,
+    paddingTop: 8,
+    paddingBottom: 14,
   },
-  backButton: { minWidth: 60, minHeight: 44, justifyContent: 'center' },
-  backText: { color: '#FDA4B3', fontSize: 14, fontWeight: '700' },
-  headerTitle: { color: '#F8FAFC', fontSize: 17, fontWeight: '900', letterSpacing: 0.5 },
-  copyAllButton: {
-    minHeight: 36,
+  backButton: {
+    width: 40,
+    height: 40,
+    alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#FF5573',
-    borderRadius: 10,
-    paddingHorizontal: 12,
+    backgroundColor: '#151F30',
+    borderWidth: 1,
+    borderColor: '#29364B',
+    borderRadius: 14,
   },
-  copyAllText: { color: '#FFF', fontSize: 12, fontWeight: '800' },
-
-  // Tabs
+  backText: { color: '#FDA4B3', fontSize: 28, lineHeight: 30, fontWeight: '500' },
+  headerTitleBlock: {
+    flex: 1,
+    marginLeft: 12,
+  },
+  eyebrow: { color: '#FF8195', fontSize: 9, fontWeight: '900', letterSpacing: 1.4 },
+  headerTitle: {
+    color: '#F8FAFC',
+    fontSize: 21,
+    fontWeight: '900',
+    letterSpacing: 0.1,
+    marginTop: 2,
+  },
+  refreshButton: {
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#151F30',
+    borderWidth: 1,
+    borderColor: '#29364B',
+    borderRadius: 14,
+  },
+  refreshIcon: { color: '#FF8195', fontSize: 24, fontWeight: '700' },
   tabRow: {
     flexDirection: 'row',
-    paddingHorizontal: 16,
-    paddingTop: 14,
-    gap: 10,
+    marginHorizontal: 16,
+    marginTop: 2,
+    marginBottom: 12,
+    padding: 4,
+    backgroundColor: '#111827',
+    borderColor: '#202B40',
+    borderWidth: 1,
+    borderRadius: 15,
+    gap: 6,
   },
   tab: {
+    flex: 1,
+    minHeight: 42,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 11,
+  },
+  tabActive: { backgroundColor: '#D83E60' },
+  tabText: { color: '#94A3B8', fontSize: 13, fontWeight: '700' },
+  tabTextActive: { color: '#FFF', fontWeight: '900' },
+  searchRow: { paddingHorizontal: 16, paddingTop: 0 },
+  searchBox: {
+    minHeight: 50,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#111A2A',
+    borderColor: '#29364B',
+    borderWidth: 1,
+    borderRadius: 15,
+    paddingLeft: 15,
+    paddingRight: 7,
+  },
+  searchBoxFocused: { borderColor: '#FF718A', backgroundColor: '#141D2E' },
+  searchIcon: { width: 20, height: 20, marginRight: 9 },
+  searchIconLens: {
+    position: 'absolute',
+    top: 1,
+    left: 1,
+    width: 13,
+    height: 13,
+    borderRadius: 7,
+    borderWidth: 2,
+    borderColor: '#94A3B8',
+  },
+  searchIconHandle: {
+    position: 'absolute',
+    right: 1,
+    bottom: 3,
+    width: 7,
+    height: 2,
+    borderRadius: 1,
+    backgroundColor: '#94A3B8',
+    transform: [{ rotate: '45deg' }],
+  },
+  searchInput: { flex: 1, minHeight: 50, color: '#FFF', fontSize: 14, paddingHorizontal: 0 },
+  clearSearchButton: {
+    width: 36,
+    height: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 18,
+    backgroundColor: '#202B40',
+  },
+  clearSearchText: { color: '#D5DCE8', fontSize: 21, fontWeight: '600', lineHeight: 24 },
+  filterLabel: {
+    color: '#748198',
+    fontSize: 9,
+    fontWeight: '900',
+    letterSpacing: 1.2,
+    marginTop: 14,
+  },
+  cityScroll: { flexGrow: 0 },
+  cityChips: { alignItems: 'center', paddingTop: 8, paddingBottom: 12, gap: 8 },
+  cityChip: {
+    minHeight: 36,
+    justifyContent: 'center',
+    backgroundColor: '#151F30',
+    borderColor: '#29364B',
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 13,
+  },
+  cityChipActive: { backgroundColor: '#2A1D2A', borderColor: '#A93D55' },
+  cityChipText: { color: '#A8B4C7', fontSize: 11, fontWeight: '700' },
+  cityChipTextActive: { color: '#FFF', fontWeight: '800' },
+  counter: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'baseline',
+    columnGap: 8,
+    rowGap: 4,
+    marginBottom: 12,
+  },
+  counterTitle: { color: '#748198', fontSize: 11, fontWeight: '900', letterSpacing: 1 },
+  counterValue: { color: '#E2E8F0', fontSize: 11, fontWeight: '700', flexShrink: 1 },
+  batchPanel: {
+    backgroundColor: '#111A2A',
+    borderColor: '#36445A',
+    borderWidth: 1,
+    borderRadius: 15,
+    marginBottom: 14,
+    padding: 13,
+  },
+  batchTitle: { color: '#FDA4B3', fontSize: 10, fontWeight: '900', letterSpacing: 0.8 },
+  batchHint: { color: '#A8B4C7', fontSize: 11, lineHeight: 16, marginTop: 5 },
+  batchActions: { flexDirection: 'row', gap: 8, marginTop: 10 },
+  batchButton: {
     flex: 1,
     minHeight: 40,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#131A2B',
-    borderColor: '#202B40',
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 8,
+  },
+  batchSelectButton: { backgroundColor: '#182235', borderColor: '#3A465A' },
+  batchApproveButton: { backgroundColor: '#146B52', borderColor: '#258365' },
+  batchButtonText: { color: '#F8FAFC', fontSize: 11, fontWeight: '800', textAlign: 'center' },
+  batchEmptyHint: { color: '#F6D68A', fontSize: 10, lineHeight: 15, marginTop: 8 },
+  list: { flex: 1 },
+  listContent: { paddingHorizontal: 16, paddingBottom: 32, flexGrow: 1 },
+  card: {
+    backgroundColor: '#111A2A',
+    borderColor: '#243149',
+    borderWidth: 1,
+    borderRadius: 18,
+    marginBottom: 12,
+    overflow: 'hidden',
+    elevation: 2,
+  },
+  batchSelection: {
+    minHeight: 34,
+    justifyContent: 'center',
+    paddingHorizontal: 15,
+    backgroundColor: '#182235',
+    borderBottomWidth: 1,
+    borderBottomColor: '#243149',
+  },
+  batchSelectionActive: { backgroundColor: '#153629' },
+  batchSelectionText: { color: '#A8B4C7', fontSize: 11, fontWeight: '700' },
+  batchSelectionTextActive: { color: '#86EFAC' },
+  cardHeader: { flexDirection: 'row', alignItems: 'center', padding: 15, gap: 12 },
+  cardIcon: {
+    width: 48,
+    height: 48,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#241E35',
+    borderRadius: 15,
+    borderWidth: 1,
+    borderColor: '#3A3150',
+  },
+  cardIconEvent: { backgroundColor: '#172A2A', borderColor: '#2A4544' },
+  cardIconEmoji: { fontSize: 22 },
+  cardTitleBlock: { flex: 1 },
+  cardTitle: { color: '#F8FAFC', fontSize: 15, lineHeight: 20, fontWeight: '800' },
+  cardSub: { color: '#A8B4C7', fontSize: 11, marginTop: 3 },
+  cardCategory: { color: '#FF9AAB', fontSize: 10, fontWeight: '800', marginTop: 5 },
+  verificationBadge: { color: '#FCD34D', fontSize: 10, fontWeight: '800', marginTop: 5 },
+  cardChevron: { color: '#7C8AA0', fontSize: 10, marginTop: 2, paddingHorizontal: 2 },
+  cardBody: {
+    borderTopColor: '#243149',
+    borderTopWidth: 1,
+    paddingHorizontal: 15,
+    paddingBottom: 14,
+    paddingTop: 6,
+  },
+  verificationPanel: {
+    backgroundColor: '#171D2A',
+    borderColor: '#36445A',
+    borderWidth: 1,
+    borderRadius: 13,
+    marginTop: 12,
+    padding: 12,
+  },
+  verificationTitle: { color: '#FDA4B3', fontSize: 10, fontWeight: '900', letterSpacing: 0.8 },
+  verificationHint: { color: '#A8B4C7', fontSize: 12, lineHeight: 18, marginTop: 5 },
+  verificationInput: {
+    minHeight: 44,
+    color: '#F8FAFC',
+    fontSize: 12,
+    backgroundColor: '#0B1020',
+    borderColor: '#3A465A',
+    borderWidth: 1,
+    borderRadius: 10,
+    marginTop: 10,
+    paddingHorizontal: 10,
+  },
+  verificationButton: {
+    minHeight: 42,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#146B52',
+    borderColor: '#258365',
+    borderWidth: 1,
+    borderRadius: 11,
+    marginTop: 10,
+    paddingHorizontal: 12,
+  },
+  pendingButton: { backgroundColor: '#463324', borderColor: '#8C6335' },
+  disabledButton: { opacity: 0.55 },
+  verificationButtonText: { color: '#F8FAFC', fontSize: 12, fontWeight: '800' },
+  fieldRow: { paddingVertical: 8, borderBottomColor: '#202B40', borderBottomWidth: 1 },
+  fieldLabel: {
+    color: '#64748B',
+    fontSize: 10,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  fieldValue: { color: '#E2E8F0', fontSize: 13, marginTop: 2, lineHeight: 18 },
+  ticketEventsTitle: { color: '#FDA4B3', fontSize: 10, fontWeight: '800', marginTop: 14 },
+  ticketEvent: { paddingVertical: 8, borderBottomColor: '#202B40', borderBottomWidth: 1 },
+  ticketEventTitle: { color: '#F8FAFC', fontSize: 13, fontWeight: '700' },
+  ticketEventDate: { color: '#A8B4C7', fontSize: 12, marginTop: 3 },
+  ticketButton: {
+    minHeight: 42,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#342038',
+    borderColor: '#77415C',
+    borderWidth: 1,
+    borderRadius: 12,
+    marginTop: 10,
+    paddingHorizontal: 12,
+  },
+  ticketButtonText: { color: '#FFD1DB', fontSize: 12, fontWeight: '800' },
+  quickActions: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 13,
+  },
+  quickActionBtn: {
+    flex: 1,
+    minHeight: 42,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#142A25',
+    borderColor: '#285342',
     borderWidth: 1,
     borderRadius: 12,
   },
-  tabActive: { backgroundColor: '#FF5573', borderColor: '#FF5573' },
-  tabText: { color: '#94A3B8', fontSize: 14, fontWeight: '700' },
-  tabTextActive: { color: '#FFF', fontWeight: '900' },
-
-  // Search
-  searchRow: { paddingHorizontal: 16, paddingTop: 12 },
-  searchInput: {
-    minHeight: 46,
-    backgroundColor: '#131A2B',
-    borderColor: '#2A3850',
-    borderWidth: 1,
-    borderRadius: 14,
-    color: '#FFF',
-    fontSize: 14,
-    paddingHorizontal: 14,
-  },
-
-  // City chips
-  cityChips: { paddingHorizontal: 16, paddingVertical: 10, gap: 8 },
-  cityChip: {
-    minHeight: 34,
-    justifyContent: 'center',
-    backgroundColor: '#1C2639',
-    borderColor: '#2A3850',
-    borderWidth: 1,
-    borderRadius: 17,
-    paddingHorizontal: 13,
-  },
-  cityChipActive: { backgroundColor: '#FF5573', borderColor: '#FF5573' },
-  cityChipText: { color: '#CFD6E4', fontSize: 12, fontWeight: '600' },
-  cityChipTextActive: { color: '#FFF', fontWeight: '800' },
-
-  // Counter
-  counter: {
-    color: '#94A3B8',
-    fontSize: 12,
-    fontWeight: '700',
-    paddingHorizontal: 18,
-    marginBottom: 6,
-  },
-
-  // List
-  listContent: { paddingHorizontal: 16, paddingBottom: 32 },
-
-  // Admin banners
-  adminBanner: {
-    marginHorizontal: 16, marginTop: 10,
-    backgroundColor: '#1A2D1A', borderColor: '#2A5A2A', borderWidth: 1,
-    borderRadius: 10, padding: 10,
-  },
-  adminBannerText: { color: '#86EFAC', fontSize: 11, fontWeight: '700', lineHeight: 16 },
-  loginBanner: {
-    marginHorizontal: 16, marginTop: 10,
-    backgroundColor: '#1A1A2D', borderColor: '#2A2A5A', borderWidth: 1,
-    borderRadius: 10, padding: 10,
-  },
-  loginBannerText: { color: '#A5B4FC', fontSize: 11, fontWeight: '700', lineHeight: 16 },
-
-  // Card
-  card: {
-    backgroundColor: '#131A2B',
-    borderColor: '#202B40',
-    borderWidth: 1,
-    borderRadius: 16,
-    marginBottom: 10,
-    overflow: 'hidden',
-  },
-  cardHeader: {
-    flexDirection: 'row',
+  quickActionText: { color: '#86EFAC', fontSize: 12, fontWeight: '800' },
+  emptyState: { alignItems: 'center', paddingVertical: 48, paddingHorizontal: 20 },
+  errorState: {
     alignItems: 'center',
-    padding: 14,
-    gap: 10,
-  },
-  cardIcon: {
-    width: 44, height: 44,
-    alignItems: 'center', justifyContent: 'center',
-    backgroundColor: '#211B37', borderRadius: 13,
-  },
-  cardIconEvent: { backgroundColor: '#1A2B1A' },
-  cardIconEmoji: { fontSize: 22 },
-  cardTitleBlock: { flex: 1 },
-  cardTitle: { color: '#F8FAFC', fontSize: 14, fontWeight: '800' },
-  cardSub: { color: '#94A3B8', fontSize: 11, marginTop: 2 },
-  cardCategory: { color: '#FF9AAB', fontSize: 10, fontWeight: '700', marginTop: 3 },
-  cardHeaderRight: { alignItems: 'center', gap: 4 },
-  cardChevron: { color: '#64748B', fontSize: 10, marginTop: 2 },
-
-  // Quick actions
-  quickActions: {
-    flexDirection: 'row', gap: 8,
-    marginTop: 12, paddingTop: 10,
-    borderTopColor: '#1A2338', borderTopWidth: 1,
-  },
-  quickActionBtn: {
-    flex: 1, minHeight: 38,
-    alignItems: 'center', justifyContent: 'center',
-    backgroundColor: '#1A2D44', borderColor: '#2A4260',
-    borderWidth: 1, borderRadius: 10,
-  },
-  quickActionPrimary: { backgroundColor: '#FF5573', borderColor: '#FF5573' },
-  quickActionText: { color: '#7DD3FC', fontSize: 12, fontWeight: '800' },
-  quickActionPrimaryText: { color: '#FFF', fontSize: 12, fontWeight: '900' },
-
-  // Card body (expanded)
-  cardBody: {
-    borderTopColor: '#202B40',
-    borderTopWidth: 1,
-    paddingHorizontal: 14,
-    paddingBottom: 12,
-    paddingTop: 4,
-  },
-
-  // Field row
-  fieldRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 7,
-    borderBottomColor: '#1A2338',
-    borderBottomWidth: 1,
-    gap: 8,
-  },
-  fieldMeta: { flex: 1 },
-  fieldLabel: { color: '#64748B', fontSize: 10, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5 },
-  fieldValue: { color: '#E2E8F0', fontSize: 13, marginTop: 2, lineHeight: 18 },
-
-  // Copy button
-  copyButton: {
-    minHeight: 30,
-    justifyContent: 'center',
-    backgroundColor: '#1C2D44',
-    borderColor: '#2A4260',
+    backgroundColor: '#251923',
+    borderColor: '#7F3143',
     borderWidth: 1,
-    borderRadius: 8,
-    paddingHorizontal: 10,
+    borderRadius: 15,
+    marginTop: 20,
+    padding: 16,
   },
-  copyButtonDone: { backgroundColor: '#1A3A2A', borderColor: '#2A6040' },
-  copyButtonText: { color: '#7DD3FC', fontSize: 11, fontWeight: '800' },
-  copyButtonTextDone: { color: '#86EFAC' },
-
-  // Empty state
-  emptyState: { alignItems: 'center', paddingVertical: 40 },
   emptyIcon: { color: '#FF9AAB', fontSize: 28, marginBottom: 10 },
-  emptyText: { color: '#F8FAFC', fontSize: 15, fontWeight: '800' },
-  emptyHint: { color: '#94A3B8', fontSize: 12, marginTop: 6 },
+  emptyText: { color: '#F8FAFC', fontSize: 15, fontWeight: '800', textAlign: 'center' },
+  emptyHint: { color: '#94A3B8', fontSize: 12, lineHeight: 18, marginTop: 6, textAlign: 'center' },
+  retryButton: {
+    alignSelf: 'center',
+    marginTop: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 9,
+    backgroundColor: '#FF5573',
+  },
+  retryButtonText: { color: '#FFF', fontSize: 12, fontWeight: '800' },
 });

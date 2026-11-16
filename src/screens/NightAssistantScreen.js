@@ -215,9 +215,12 @@ export default function NightAssistantScreen({ onBack }) {
   });
   useSpeechRecognitionEvent('error', (event) => {
     setListening(false);
-    if (event.error !== 'aborted' && event.error !== 'no-speech') {
-      Alert.alert('Dictado no disponible', 'No pude usar el micrófono. Podés escribir tu consulta.');
+    if (event.error === 'aborted') return;
+    if (event.error === 'no-speech') {
+      Alert.alert('No te escuché', 'Hablá cerca del micrófono y volvé a intentar, o escribí tu consulta.');
+      return;
     }
+    Alert.alert('Dictado no disponible', `No pude usar el micrófono (${event.error || 'error'}). Podés escribir tu consulta.`);
   });
 
   const toggleListening = async () => {
@@ -234,7 +237,15 @@ export default function NightAssistantScreen({ onBack }) {
       Alert.alert('Permiso del micrófono', 'Activá el micrófono para dictar tu consulta o escribila a mano.');
       return;
     }
-    ExpoSpeechRecognitionModule.start({ lang: 'es-419', interimResults: true, continuous: false });
+    ExpoSpeechRecognitionModule.start({
+      lang: 'es-419',
+      interimResults: true,
+      continuous: true,
+      androidIntentOptions: {
+        EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS: 2500,
+        EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS: 2500,
+      },
+    });
   };
   const loadEventsForFallback = async () => {
     if (eventsCacheRef.current) return eventsCacheRef.current;

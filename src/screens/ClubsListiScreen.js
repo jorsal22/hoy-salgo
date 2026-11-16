@@ -1,4 +1,5 @@
-import React, { useEffect, useState } from 'react';
+/* eslint-disable react-hooks/set-state-in-effect */
+import React, { useCallback, useEffect, useState } from 'react';
 import { 
   View, 
   Text, 
@@ -10,7 +11,7 @@ import {
   SafeAreaView,
   Dimensions 
 } from 'react-native';
-import { supabase } from '../lib/supabase';
+import { supabase } from '../config/supabase';
 
 const { width } = Dimensions.get('window');
 
@@ -19,38 +20,38 @@ export default function ClubsListScreen({ navigation }) {
   const [featuredEvents, setFeaturedEvents] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    fetchData();
-  }, []);
-
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     try {
       setLoading(true);
 
-      // 1. Cargar Boliches
       const { data: clubsData, error: clubsError } = await supabase
         .from('clubs')
         .select('*')
+        .eq('verification_status', 'verified')
         .order('name', { ascending: true });
 
       if (clubsError) throw clubsError;
       setClubs(clubsData || []);
 
-      // 2. Cargar Eventos Destacados para el Carrusel (ej: tomamos los primeros 5)
       const { data: eventsData, error: eventsError } = await supabase
         .from('events')
         .select('*')
+        .eq('verification_status', 'verified')
         .limit(5);
 
       if (eventsError) throw eventsError;
       setFeaturedEvents(eventsData || []);
-
     } catch (err) {
-      console.error('Error al cargar datos:', err.message);
+      const message = err instanceof Error ? err.message : String(err);
+      console.error('Error al cargar datos:', message);
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
 
   if (loading) {
     return (
