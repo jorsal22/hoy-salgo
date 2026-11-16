@@ -50,6 +50,12 @@ export const validateAssistantResponse = (data) => {
       typeof event.id === 'string' &&
       typeof event.title === 'string'
     ).slice(0, 3),
+    followUps: Array.isArray(data.follow_ups)
+      ? data.follow_ups
+        .filter((item) => typeof item === 'string' && item.trim())
+        .map((item) => item.trim().slice(0, 60))
+        .slice(0, 3)
+      : [],
   };
 };
 

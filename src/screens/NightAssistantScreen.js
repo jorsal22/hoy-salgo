@@ -28,9 +28,10 @@ import {
 import { searchAssistantEvents } from '../services/nightAssistantSearchService';
 
 const QUICK_PROMPTS = [
-  'No sé qué hacer, ayudame a elegir',
+  'Sorprendeme con un plan',
   '¿Qué hay para hacer hoy?',
-  'Buscame electrónica en Punta del Este',
+  'Electrónica en Punta del Este',
+  'Fiestas de Año Nuevo',
 ];
 
 const ASSISTANT_TIMEOUT_MS = 15_000;
@@ -65,7 +66,11 @@ function AssistantEventCard({ event }) {
       <Text style={styles.eventVenue}>
         {[event.venue_name, event.city].filter(Boolean).join(' · ') || 'Lugar a confirmar'}
       </Text>
-      {event.category ? <Text style={styles.eventCategory}>{event.category}</Text> : null}
+      {event.category ? (
+        <Text style={styles.eventCategory}>
+          {[event.category, event.age_range].filter(Boolean).join(' · ')}
+        </Text>
+      ) : null}
       {ticketUrl ? (
         <TouchableOpacity
           accessibilityRole="link"
@@ -82,7 +87,7 @@ function AssistantEventCard({ event }) {
   );
 }
 
-function ChatMessage({ message }) {
+function ChatMessage({ message, onFollowUp }) {
   const isUser = message.role === 'user';
   return (
     <View style={[styles.messageRow, isUser && styles.userMessageRow]}>
@@ -98,6 +103,20 @@ function ChatMessage({ message }) {
             <AssistantEventCard key={event.id} event={event} />
           ))
           : null}
+        {!isUser && message.followUps?.length ? (
+          <View style={styles.followUps}>
+            {message.followUps.map((text) => (
+              <TouchableOpacity
+                accessibilityRole="button"
+                key={text}
+                onPress={() => onFollowUp?.(text)}
+                style={styles.promptChip}
+              >
+                <Text style={styles.promptText}>{text}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        ) : null}
       </View>
     </View>
   );
@@ -107,7 +126,7 @@ export default function NightAssistantScreen({ onBack }) {
   const [messages, setMessages] = useState([{
     id: 'welcome',
     role: 'assistant',
-    content: '¡Hola! Soy el asistente de Hoy Salgo. ¿En qué te puedo ayudar? Puedo buscarte planes por ciudad, fecha o música. Si todavía no sabés qué hacer, contame qué tipo de noche te gustaría y te ayudo a elegir.',
+    content: '¡Hola! Soy tu conserje de salidas. Conozco los boliches y fiestas de todo Uruguay con entradas verificadas. Contame: ¿qué ganas tenés hoy, algo para bailar o algo más tranqui? ¿Y en qué zona?',
   }]);
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
@@ -238,7 +257,13 @@ export default function NightAssistantScreen({ onBack }) {
             </Text>
           </View>
 
-          {messages.map((message) => <ChatMessage key={message.id} message={message} />)}
+          {messages.map((message, index) => (
+            <ChatMessage
+              key={message.id}
+              message={message}
+              onFollowUp={index === messages.length - 1 && !sending ? sendMessage : undefined}
+            />
+          ))}
 
           {messages.length === 1 ? (
             <View style={styles.quickPrompts}>
@@ -346,6 +371,7 @@ const styles = StyleSheet.create({
   messageText: { color: '#E8EDF5', fontSize: 14, lineHeight: 20 },
   userMessageText: { color: '#FFF' },
   quickPrompts: { alignItems: 'flex-start', gap: 8, marginBottom: 16 },
+  followUps: { alignItems: 'flex-start', gap: 8, marginTop: 12 },
   promptChip: {
     minHeight: 40,
     justifyContent: 'center',
