@@ -225,12 +225,16 @@ export default function NightAssistantScreen({ onBack }) {
       ExpoSpeechRecognitionModule.stop();
       return;
     }
+    if (!ExpoSpeechRecognitionModule.isRecognitionAvailable()) {
+      Alert.alert('Dictado no disponible', 'Este teléfono no tiene un servicio de reconocimiento de voz activo (Google). Podés escribir tu consulta.');
+      return;
+    }
     const permission = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
     if (!permission.granted) {
       Alert.alert('Permiso del micrófono', 'Activá el micrófono para dictar tu consulta o escribila a mano.');
       return;
     }
-    ExpoSpeechRecognitionModule.start({ lang: 'es-UY', interimResults: true, continuous: false });
+    ExpoSpeechRecognitionModule.start({ lang: 'es-419', interimResults: true, continuous: false });
   };
   const loadEventsForFallback = async () => {
     if (eventsCacheRef.current) return eventsCacheRef.current;
