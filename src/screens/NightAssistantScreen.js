@@ -27,7 +27,8 @@ import {
   getAssistantErrorMessage,
   validateAssistantResponse,
 } from '../services/nightAssistantService';
-import { searchAssistantEvents } from '../services/nightAssistantSearchService';
+import { asksForNearby, searchAssistantEvents } from '../services/nightAssistantSearchService';
+import { getApproximateUserLocation } from '../services/locationService';
 
 const QUICK_PROMPTS = [
   'Sorprendeme con un plan',
@@ -239,17 +240,28 @@ export default function NightAssistantScreen({ onBack }) {
 
     try {
       let answer;
+      let location = null;
+      let locationReason = null;
+      if (asksForNearby(message)) {
+        ({ location, reason: locationReason } = await getApproximateUserLocation());
+      }
+      const locationNote = locationReason === 'denied'
+        ? ' Para buscar cerca tuyo necesito el permiso de ubicación; podés activarlo en los ajustes del teléfono o decirme tu ciudad o barrio.'
+        : locationReason === 'unavailable'
+        ? ' No pude obtener tu ubicación; decime tu ciudad o barrio.'
+        : '';
       const helpReply = getAssistantHelpReply(message);
       if (helpReply) {
         answer = { content: helpReply, events: [] };
       } else {
         try {
           const { data, error } = await supabase.functions.invoke('night-assistant', {
-            body: { message, history },
+            body: { message, history, ...(location ? { location } : {}) },
             timeout: ASSISTANT_TIMEOUT_MS,
           });
           if (error) throw error;
           answer = validateAssistantResponse(data);
+          if (locationNote) answer = { ...answer, content: `${answer.content}${locationNote}` };
         } catch (aiError) {
           let events = [];
           let eventsError = null;
@@ -258,7 +270,7 @@ export default function NightAssistantScreen({ onBack }) {
           } catch (error) {
             eventsError = error;
           }
-          const localAnswer = searchAssistantEvents(message, events);
+          const localAnswer = searchAssistantEvents(message, events, undefined, { userLocation: location });
           const busy = aiError?.context?.status === 429;
           const eventsDetail = eventsError
             ? `Tampoco pude consultar los eventos: ${await getAssistantErrorMessage(eventsError)}.`
@@ -267,7 +279,7 @@ export default function NightAssistantScreen({ onBack }) {
             ? 'Estoy con mucha demanda, así que te muestro lo que encontré directo en la cartelera.'
             : `${await getAssistantErrorMessage(aiError)} Busqué directamente en los eventos verificados.`;
           answer = {
-            content: [intro, eventsDetail, localAnswer.reply].filter(Boolean).join(' '),
+            content: [intro, eventsDetail, localAnswer.reply, locationNote.trim()].filter(Boolean).join(' '),
             events: localAnswer.events,
             isFallback: !busy,
           };

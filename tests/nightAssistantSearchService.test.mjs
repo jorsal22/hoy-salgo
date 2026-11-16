@@ -125,6 +125,18 @@ test('filters by age, price and neighborhood', () => {
   assert.match(cheap.reply, /Precios cargados/);
 });
 
+test('sorts by proximity when the phone location is available', () => {
+  const list = [
+    mk('mvd', { city: 'Montevideo', event_date: '2026-12-05 23:00:00' }),
+    mk('pde', { city: 'Punta del Este', event_date: '2026-12-06 23:00:00' }),
+  ];
+  const pdeUser = { latitude: -34.96, longitude: -54.95 };
+  const result = searchAssistantEvents('qué hay cerca mío', list, now, { userLocation: pdeUser });
+  assert.deepEqual(result.events.map((e) => e.id), ['pde', 'mvd']);
+  assert.match(result.reply, /a unos|a menos de 1 km/);
+  assert.match(searchAssistantEvents('qué hay cerca mío', list, now).reply, /ciudad o barrio/);
+});
+
 test('treats vague requests as open recommendations', () => {
   const result = searchAssistantEvents('algo copado', [mk('a')], now);
   assert.match(result.reply, /próximas opciones/);

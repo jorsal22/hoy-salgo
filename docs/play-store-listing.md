@@ -32,11 +32,11 @@ eventos, fiestas, boliches, Uruguay, Punta del Este
 - Referencias a alcohol/sustancias: sí, informativas (promoción de eventos nocturnos).
 - Apuestas: no. Compras dentro de la app: no (las entradas se compran en sitios externos).
 - Contenido generado por usuarios: sí (los usuarios pueden proponer boliches y eventos; se moderan antes de publicar).
-- Ubicación compartida: no.
+- Ubicación: ubicación aproximada, opcional, solo al pedir eventos cerca; se procesa para dar la respuesta y no se almacena.
 - Público objetivo: 18+.
 
 ## Seguridad de los datos (Data safety)
-- Recopila: nombre y correo (cuenta con Google), ID de usuario, fotos elegidas por el usuario, interacciones en la app.
+- Recopila: nombre y correo (cuenta con Google), ID de usuario, fotos elegidas por el usuario, interacciones en la app, ubicación aproximada (opcional, efímera, solo para ordenar resultados).
 - Compartidos con terceros: no se venden; se procesan con Supabase y Google.
 - Cifrado en tránsito: sí.
 - Eliminación de datos: por pedido al correo de contacto (ver política).

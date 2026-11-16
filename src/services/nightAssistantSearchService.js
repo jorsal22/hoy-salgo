@@ -4,6 +4,12 @@ import {
   getEventDateKey,
   getLocalDateKey,
 } from './eventDateService.js';
+import {
+  formatDistance,
+  getEventDistanceKm,
+  isValidLocation,
+  sortByProximity,
+} from './geoService.js';
 
 const normalize = (value) =>
   String(value || '')
@@ -73,7 +79,12 @@ const PRICE_TERMS = [
 ];
 const CHEAP_TERMS = ['barato', 'barata', 'economico', 'economica'];
 const AGE_TERMS = ['edad', 'edades', 'mayores', 'menores', 'mayor', 'menor'];
-const NEARBY_TERMS = ['cerca', 'cercano', 'cercana', 'cerca mio', 'cerca de mi', 'ubicacion'];
+const NEARBY_TERMS = [
+  'cerca', 'cercano', 'cercana', 'cerca mio', 'cerca de mi', 'ubicacion',
+  'por aca', 'alrededor', 'mas cercano', 'donde estoy',
+];
+
+export const asksForNearby = (message) => containsAny(normalize(message), NEARBY_TERMS);
 
 const getMonthIndex = (name) =>
   name in MONTH_ALIASES ? MONTH_ALIASES[name] : MONTHS.indexOf(name);
@@ -127,15 +138,6 @@ const getPriceFilter = (query) => {
   const max = query.match(/\b(?:hasta|menos de|maximo|max)\s*\$?\s*(\d{2,6})\b|\$\s?(\d{2,6})\b|\b(\d{2,6})\s*(?:pesos|uyu)\b/);
   if (max) return { max: Number(max[1] || max[2] || max[3]) };
   return null;
-};
-
-const getDistanceKm = (from, to) => {
-  const toRad = (deg) => (deg * Math.PI) / 180;
-  const dLat = toRad(to.latitude - from.latitude);
-  const dLon = toRad(to.longitude - from.longitude);
-  const a = Math.sin(dLat / 2) ** 2 +
-    Math.cos(toRad(from.latitude)) * Math.cos(toRad(to.latitude)) * Math.sin(dLon / 2) ** 2;
-  return 6371 * 2 * Math.asin(Math.sqrt(a));
 };
 
 const getExplicitDateFilter = (query, today) => {
@@ -358,8 +360,8 @@ export const searchAssistantEvents = (message, sourceEvents, now = Date.now(), o
   const priceAsked = containsAny(query, PRICE_TERMS) || Boolean(priceFilter);
   const ageAsked = containsAny(query, AGE_TERMS) || Boolean(ageFilter);
   const locationAsked = containsAny(query, NEARBY_TERMS);
-  const userLocation = options.userLocation;
-  const hasUserLocation = Number.isFinite(userLocation?.latitude) && Number.isFinite(userLocation?.longitude);
+  const userLocation = isValidLocation(options.userLocation) ? options.userLocation : null;
+  const hasUserLocation = Boolean(userLocation);
 
   const hasCriteria = Boolean(
     city || neighborhood || interest || dateFilter || newYearFilter || keywords.length ||
@@ -393,9 +395,8 @@ export const searchAssistantEvents = (message, sourceEvents, now = Date.now(), o
     const price = (event) => getEventPrice(event) ?? Infinity;
     matches = [...matches].sort((first, second) => price(first) - price(second));
   }
-  if (hasUserLocation && matches.every((event) => Number.isFinite(event.latitude))) {
-    const distance = (event) => getDistanceKm(userLocation, event);
-    matches = [...matches].sort((first, second) => distance(first) - distance(second));
+  if (hasUserLocation && (locationAsked || !dateFilter)) {
+    matches = sortByProximity(matches, userLocation);
   }
 
   let recommendations = matches.slice(0, 3);
@@ -430,6 +431,12 @@ export const searchAssistantEvents = (message, sourceEvents, now = Date.now(), o
     reply += ' Recordá que los eventos sin edad cargada no entran en este filtro.';
   } else if (ageAsked) {
     reply += ' Decime tu edad o "+18" y filtro por edad mínima.';
+  }
+  if (locationAsked && hasUserLocation && recommendations.length) {
+    const distance = getEventDistanceKm(recommendations[0], userLocation);
+    if (distance !== null) {
+      reply += ` El más cercano queda en ${recommendations[0].city || 'tu zona'}, ${formatDistance(distance)}.`;
+    }
   }
   if (locationAsked && !city && !neighborhood && !hasUserLocation) {
     reply += ' Decime una ciudad o barrio y busco por esa zona.';

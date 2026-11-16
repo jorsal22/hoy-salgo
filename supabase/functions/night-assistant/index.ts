@@ -38,6 +38,66 @@ const normalizeText = (value: unknown) =>
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase();
 
+// Centros aproximados de ciudades y barrios (mismos que src/services/geoService.js).
+const CITY_COORDS: Record<string, [number, number]> = {
+  "montevideo": [-34.9011, -56.1645],
+  "punta del este": [-34.9602, -54.95],
+  "maldonado": [-34.9, -54.957],
+  "la barra": [-34.912, -54.87],
+  "colonia": [-34.4626, -57.84],
+  "florida": [-34.099, -56.214],
+  "rocha": [-34.4833, -54.3333],
+  "salto": [-31.3833, -57.9667],
+  "san jose de mayo": [-34.3375, -56.7136],
+  "trinidad": [-33.5167, -56.9],
+  "carmelo": [-33.997, -58.285],
+  "rivera": [-30.9053, -55.5508],
+  "paysandu": [-32.3214, -58.0756],
+  "guichon": [-32.3667, -57.2],
+  "durazno": [-33.3806, -56.5236],
+  "mercedes": [-33.2524, -58.0305],
+  "artigas": [-30.4, -56.4667],
+  "fray bentos": [-33.1167, -58.3],
+  "atlantida": [-34.7667, -55.7667],
+  "tacuarembo": [-31.7167, -55.9833],
+  "ciudad de la costa": [-34.8167, -55.95],
+  "canelones": [-34.5228, -56.2778],
+  "centro": [-34.906, -56.188],
+  "cordon": [-34.905, -56.178],
+  "parque rodo": [-34.915, -56.165],
+  "aguada": [-34.893, -56.19],
+  "pocitos": [-34.91, -56.15],
+  "playa brava": [-34.968, -54.93],
+  "ciudad vieja": [-34.9065, -56.2045],
+  "carrasco": [-34.8855, -56.0625],
+};
+
+const getEventDistanceKm = (
+  event: { city: string | null; neighborhood: string | null },
+  location: { latitude: number; longitude: number },
+) => {
+  const pair = CITY_COORDS[normalizeText(event.neighborhood).trim()] ||
+    CITY_COORDS[normalizeText(event.city).trim()];
+  if (!pair) return null;
+  const toRad = (deg: number) => (deg * Math.PI) / 180;
+  const dLat = toRad(pair[0] - location.latitude);
+  const dLon = toRad(pair[1] - location.longitude);
+  const a = Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(location.latitude)) * Math.cos(toRad(pair[0])) * Math.sin(dLon / 2) ** 2;
+  return 6371 * 2 * Math.asin(Math.sqrt(a));
+};
+
+const parseLocation = (value: unknown) => {
+  if (!value || typeof value !== "object") return null;
+  const { latitude, longitude } = value as Record<string, unknown>;
+  if (
+    typeof latitude !== "number" || typeof longitude !== "number" ||
+    !Number.isFinite(latitude) || !Number.isFinite(longitude) ||
+    Math.abs(latitude) > 90 || Math.abs(longitude) > 180
+  ) return null;
+  return { latitude, longitude };
+};
+
 const IGNORED_WORDS = new Set([
   "para", "algo", "quiero", "buscame", "hoy", "con", "una", "uno", "que", "del", "los", "las",
   "por", "hay", "mas", "muy", "esta", "este", "como", "tengo", "ganas", "salir",
@@ -200,10 +260,28 @@ Deno.serve(async (request) => {
     }).slice(0, MAX_RELEVANT_EVENTS)
     : [];
   const relevantIds = new Set(relevant.map((event) => event.id));
-  const events = [
+  const userLocation = parseLocation(input.location);
+  const distanceById = new Map<string, number>();
+  let ranked = [
     ...relevant,
     ...upcoming.filter((event) => !relevantIds.has(event.id)),
-  ].slice(0, MAX_CONTEXT_EVENTS);
+  ];
+  if (userLocation) {
+    for (const event of upcoming) {
+      const distance = getEventDistanceKm(event, userLocation);
+      if (distance !== null) distanceById.set(event.id, distance);
+    }
+    // Tramos de 5 km; dentro de cada tramo se conserva el orden por relevancia y fecha.
+    const bucket = (event: AssistantEvent) =>
+      distanceById.has(event.id) ? Math.floor(distanceById.get(event.id)! / 5) : Infinity;
+    ranked = ranked
+      .map((event, index) => ({ event, index }))
+      .sort((first, second) =>
+        bucket(first.event) - bucket(second.event) || first.index - second.index
+      )
+      .map(({ event }) => event);
+  }
+  const events = ranked.slice(0, MAX_CONTEXT_EVENTS);
 
   if (!events.length) {
     return jsonResponse({
@@ -224,6 +302,9 @@ Deno.serve(async (request) => {
     age: event.age_range,
     info: event.description,
     has_ticket_link: Boolean(event.ticket_url),
+    ...(distanceById.has(event.id)
+      ? { approx_distance_km: Math.round(distanceById.get(event.id)!) }
+      : {}),
   }));
   const todayLabel = new Intl.DateTimeFormat("es-UY", {
     timeZone: "America/Montevideo",
@@ -241,6 +322,9 @@ Deno.serve(async (request) => {
     "Si preguntan qué podés hacer, contalo en una o dos frases y arrancá preguntando qué plan tiene en mente.",
     "Si preguntan por planes, precios o cómo publicar: para quien busca salir, la app es gratis. Sobre publicar eventos NO digas si es gratis o pago: los boliches que quieran publicar sus eventos en la app y las fiestas sueltas se coordinan por WhatsApp con el equipo de Hoy Salgo: decí que toquen el botón PROMOCIONAR de la pantalla de Inicio. Quien quiera ser RRPP usa el botón SER RRPP. NUNCA menciones precios, tarifas ni montos de planes u otros servicios de Hoy Salgo; si insisten, decí que las condiciones se coordinan por WhatsApp. No des pasos, paneles ni formularios, y no inventes planes, descuentos ni beneficios.",
     "Usá únicamente los eventos del catálogo del mensaje actual. Mencioná fechas en lenguaje natural (por ejemplo 'este sábado').",
+    userLocation
+      ? "El usuario compartió su ubicación aproximada: el catálogo viene ordenado de más cerca a más lejos y approx_distance_km es la distancia aproximada hasta el centro de la ciudad o barrio del evento. Si pide algo cerca, priorizá los más cercanos y mencioná la distancia como aproximada."
+      : "",
     "No inventes fechas, lugares, precios, edades, disponibilidad ni enlaces. Si un dato no está en el catálogo, decí que no está cargado y sugerí consultarlo en la entrada. Si no hay coincidencias, decilo y ofrecé la alternativa más cercana.",
     "Devolvé solo los IDs exactos de los eventos que recomendás en event_ids (máximo 3, o vacío si solo estás preguntando).",
     "follow_ups son 2 o 3 respuestas rápidas que el usuario podría tocar, cortas (máximo 5 palabras), en primera persona o imperativo, por ejemplo 'Electrónica en Punta', 'Algo tranqui', 'Con amigos'.",
