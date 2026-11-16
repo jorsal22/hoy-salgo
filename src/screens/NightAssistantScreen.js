@@ -217,19 +217,24 @@ export default function NightAssistantScreen({ onBack }) {
       setTranscribing(true);
       try {
         await recorder.stop();
-        const uri = recorder.uri;
+        const uri = recorder.uri || recorder.getStatus?.().url;
         if (!uri) throw new Error('sin audio');
         const form = new FormData();
-        form.append('file', { uri, name: 'audio.m4a', type: 'audio/m4a' });
-        const { data, error } = await supabase.functions.invoke('night-assistant', { body: form });
-        if (error) throw error;
+        form.append('file', { uri, name: 'audio.m4a', type: 'audio/mp4' });
+        const response = await fetch(`${supabase.supabaseUrl}/functions/v1/night-assistant`, {
+          method: 'POST',
+          headers: { apikey: supabase.supabaseKey, Authorization: `Bearer ${supabase.supabaseKey}` },
+          body: form,
+        });
+        const data = await response.json().catch(() => null);
+        if (!response.ok) throw new Error(`${response.status} ${data?.error || ''}`.trim());
         if (data?.text) {
           setDraft(data.text.slice(0, 400));
         } else {
           Alert.alert('No te escuché', 'Hablá cerca del micrófono y volvé a intentar, o escribí tu consulta.');
         }
-      } catch {
-        Alert.alert('Dictado no disponible', 'No pude convertir tu voz en texto. Revisá tu conexión o escribí tu consulta.');
+      } catch (error) {
+        Alert.alert('Dictado no disponible', `No pude convertir tu voz en texto (${String(error?.message || error).slice(0, 80)}).`);
       } finally {
         setTranscribing(false);
       }
