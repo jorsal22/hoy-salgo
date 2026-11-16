@@ -1,18 +1,21 @@
 
-import React, { Component, useCallback, useEffect, useState } from 'react';
+import React, { Component, useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Linking, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { supabase } from './src/config/supabase';
 import { getUserEmail, isAdminUser } from './src/config/admin';
-import { isGoogleAuthCallback, processGoogleAuthCallback } from './src/services/googleAuthCallback';
+import { authCoordinator, isGoogleAuthCallback, processGoogleAuthCallback } from './src/services/googleAuthCallback';
+import { parseRrppLink } from './src/services/rrppLinkService';
 import AddEventScreen from './src/screens/AddEventScreen';
 import AddClubScreen from './src/screens/AddClubScreen';
 import AdminDashboardScreen from './src/screens/AdminDashboardScreen';
 import DataBankScreen from './src/screens/DataBankScreen';
+import NightAssistantScreen from './src/screens/NightAssistantScreen';
 import FixedClubsScreen from './src/screens/FixedClubsScreen';
 import FavoritesScreen from './src/screens/FavoritesScreen';
 import HomeScreen from './src/screens/HomeScreen';
 import LoginScreen from './src/screens/LoginScreen';
+import RrppScreen from './src/screens/RrppScreen';
 
 const SESSION_RESTORE_TIMEOUT_MS = 8000;
 
@@ -57,11 +60,37 @@ function AppContent() {
   const [eventPrefill, setEventPrefill] = useState(null);
   const [eventToEdit, setEventToEdit] = useState(null);
   const [homeRefreshKey, setHomeRefreshKey] = useState(0);
+  const [referral, setReferral] = useState(null);
+  const pendingRrpp = useRef(false);
 
   const handleAuthenticatedSession = useCallback((nextSession) => {
     setSession(nextSession);
     setShowLogin(false);
+    if (nextSession && pendingRrpp.current) {
+      pendingRrpp.current = false;
+      setScreen('rrpp');
+    }
     if (!nextSession) setClubToEdit(null);
+  }, []);
+
+  useEffect(() => {
+    const handleUrl = (url) => {
+      if (!url) return;
+      try {
+        const nextReferral = parseRrppLink(url);
+        if (!nextReferral) return;
+        setReferral(nextReferral);
+        setScreen('home');
+      } catch (error) {
+        console.error('No se pudo procesar el enlace:', error);
+        Alert.alert('Enlace inválido', error.message || 'No se pudo abrir el enlace.');
+      }
+    };
+    Linking.getInitialURL().then(handleUrl).catch((error) => {
+      console.error('No se pudo leer el enlace inicial:', error);
+    });
+    const subscription = Linking.addEventListener('url', ({ url }) => handleUrl(url));
+    return () => subscription.remove();
   }, []);
 
   useEffect(() => {
@@ -75,22 +104,23 @@ function AppContent() {
       setCheckingSession(false);
     };
 
-    const handleIncomingUrl = (url) => {
-      if (!isGoogleAuthCallback(url)) return;
-      processGoogleAuthCallback(url).catch((error) => {
-        Alert.alert('Error de Google', error.message || 'No se pudo completar el acceso.');
+    // Este manejo queda reservado para callbacks recibidos
+    // al abrir la aplicación desde un enlace externo.
+    // El login iniciado desde LoginScreen procesa su propio callback.
+    const initialCallback = Linking.getInitialURL()
+      .then((url) => {
+        if (url && isGoogleAuthCallback(url)) {
+          return processGoogleAuthCallback(url);
+        }
+      })
+      .catch((error) => {
+        console.error('No se pudo procesar el enlace inicial de Google:', error);
+        Alert.alert(
+          'Error de Google',
+          error.message || 'No se pudo completar el acceso.'
+        );
       });
-    };
-
-    const linkSubscription = Linking.addEventListener('url', ({ url }) => {
-      handleIncomingUrl(url);
-    });
-
-    Linking.getInitialURL().then((url) => {
-      if (url) handleIncomingUrl(url);
-    }).catch((error) => {
-      console.error('No se pudo leer el enlace de inicio:', error);
-    });
+    authCoordinator.setInitialCallback(initialCallback);
 
     const authState = supabase.auth.onAuthStateChange((event, nextSession) => {
       receivedAuthEvent = true;
@@ -139,7 +169,6 @@ function AppContent() {
     return () => {
       isMounted = false;
       clearTimeout(sessionRestoreTimeout);
-      linkSubscription.remove();
       subscription?.unsubscribe();
     };
   }, [handleAuthenticatedSession]);
@@ -224,15 +253,6 @@ function AppContent() {
     setScreen('edit-club');
   };
 
-  if (session && isAdmin && screen === 'admin-dashboard') {
-    return (
-      <AdminDashboardScreen
-        onBack={() => setScreen('home')}
-        onCreateEvent={() => handleCreateEvent()}
-      />
-    );
-  }
-
   if (session && isAdmin && (screen === 'add-club' || screen === 'edit-club')) {
     return (
       <AddClubScreen
@@ -271,10 +291,19 @@ function AppContent() {
     );
   }
 
+  if (session && isAdmin && screen === 'admin-dashboard') {
+    return <AdminDashboardScreen onBack={() => setScreen('home')} />;
+  }
+
+  if (session && screen === 'rrpp') {
+    return <RrppScreen userId={session.user.id} isAdmin={isAdmin} onBack={() => setScreen('home')} />;
+  }
+
   if (!session && showLogin) {
     return (
       <LoginScreen
         onBack={() => {
+          pendingRrpp.current = false;
           setShowLogin(false);
         }}
         onAuthenticated={handleAuthenticatedSession}
@@ -282,14 +311,14 @@ function AppContent() {
     );
   }
 
+  if (screen === 'assistant') {
+    return <NightAssistantScreen onBack={() => setScreen('home')} />;
+  }
+
   if (screen === 'databank') {
     return (
       <DataBankScreen
         onBack={() => setScreen('home')}
-        isAdmin={isAdmin}
-        isAuthenticated={Boolean(session)}
-        onUseForEvent={isAdmin ? (prefill) => handleCreateEvent(prefill) : null}
-        onSignIn={handleSignOut}
       />
     );
   }
@@ -333,7 +362,17 @@ function AppContent() {
         setScreen('favorites');
       }}
       onShowDataBank={() => setScreen('databank')}
+      onShowAssistant={() => setScreen('assistant')}
       onShowDashboard={isAdmin ? () => setScreen('admin-dashboard') : undefined}
+      onShowRrpp={() => {
+        if (!session) {
+          pendingRrpp.current = true;
+          setShowLogin(true);
+        }
+        else setScreen('rrpp');
+      }}
+      referral={referral}
+      onClearReferral={() => setReferral(null)}
       accountEmail={getUserEmail(session?.user)}
       userId={session?.user?.id}
       isAdmin={isAdmin}

@@ -165,6 +165,7 @@ export default function HomeScreen({
   onSignOut,
   onShowFavorites,
   onShowDataBank,
+  onShowAssistant,
   onShowDashboard,
   onShowRrpp,
   referral,
@@ -1020,6 +1021,18 @@ export default function HomeScreen({
           >
             <Text style={styles.bottomNavigationIcon}>♥</Text>
             <Text style={styles.bottomNavigationLabel}>Guardados</Text>
+          </TouchableOpacity>
+        ) : null}
+
+        {onShowAssistant ? (
+          <TouchableOpacity
+            accessibilityRole="button"
+            accessibilityLabel="Asistente de Hoy Salgo"
+            onPress={onShowAssistant}
+            style={styles.bottomNavigationButton}
+          >
+            <Text style={styles.bottomNavigationIcon}>✦</Text>
+            <Text style={styles.bottomNavigationLabel}>Asistente</Text>
           </TouchableOpacity>
         ) : null}
 
