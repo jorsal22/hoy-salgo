@@ -11,7 +11,8 @@ import {
   sortByProximity,
 } from './geoService.js';
 
-const MAX_RESULTS = 8;
+const MAX_RESULTS = 30;
+const WANTS_MANY = /\b(fin de ano|diciembre|noviembre|enero|este mes|esta semana|todo lo que hay|todos los eventos|todas las fiestas|proximos dias|agenda|lista)\b/;
 
 const normalize = (value) =>
   String(value || '')
@@ -401,7 +402,7 @@ export const searchAssistantEvents = (message, sourceEvents, now = Date.now(), o
     matches = sortByProximity(matches, userLocation);
   }
 
-  let recommendations = matches.slice(0, MAX_RESULTS);
+  let recommendations = matches.slice(0, newYearFilter || WANTS_MANY.test(query) ? MAX_RESULTS : 3);
   let reply = '';
   if (matches.length) {
     reply = matches.length === 1
