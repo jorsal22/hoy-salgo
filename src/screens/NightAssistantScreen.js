@@ -211,7 +211,7 @@ export default function NightAssistantScreen({ onBack }) {
     try {
       const data = await fetchAllPages((from, to) => supabase
         .from('events')
-        .select('id, title, venue_name, event_date, event_end_date, city, category, club_id, ticket_url, verification_status')
+        .select('id, title, venue_name, event_date, event_end_date, city, neighborhood, age_range, ticket_price_uyu, category, club_id, ticket_url, verification_status')
         .eq('verification_status', 'verified')
         .order('event_date', { ascending: true })
         .range(from, to)

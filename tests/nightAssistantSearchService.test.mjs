@@ -81,3 +81,51 @@ test('explains when there are no verified plans to choose from', () => {
   assert.match(result.reply, /no hay eventos futuros verificados/);
   assert.deepEqual(result.events, []);
 });
+
+const mk = (id, extra) => ({
+  id, title: id, city: 'Montevideo', club_id: 'c', category: 'Fiesta', event_date: '2026-12-05 23:00:00', ...extra,
+});
+
+test('weekend keeps the current weekend when asked on Saturday or Sunday', () => {
+  const list = [mk('sat', { event_date: '2026-11-14 23:00:00' }), mk('next', { event_date: '2026-11-20 23:00:00' })];
+  const saturday = new Date(2026, 10, 14, 12).getTime();
+  assert.deepEqual(searchAssistantEvents('algo este finde', list, saturday).events.map((e) => e.id), ['sat']);
+  assert.deepEqual(searchAssistantEvents('el finde que viene', list, saturday).events.map((e) => e.id), ['next']);
+});
+
+test('does not match words by accident', () => {
+  const list = [mk('rocha', { title: 'Noche en Rocha', category: 'Fiesta', city: 'Rocha' }), mk('rock', { title: 'Rock Night', category: 'Rock' })];
+  assert.deepEqual(searchAssistantEvents('quiero rock', list, now).events.map((e) => e.id), ['rock']);
+});
+
+test('respects the year and explicit day in dates', () => {
+  const list = [
+    mk('a', { event_date: '2027-01-10 23:00:00' }),
+    mk('b', { event_date: '2028-01-10 23:00:00' }),
+    mk('c', { event_date: '2026-12-15 23:00:00' }),
+  ];
+  assert.deepEqual(searchAssistantEvents('enero 2028', list, now).events.map((e) => e.id), ['b']);
+  assert.deepEqual(searchAssistantEvents('enero', list, now).events.map((e) => e.id), ['a']);
+  assert.deepEqual(searchAssistantEvents('15 de diciembre', list, now).events.map((e) => e.id), ['c']);
+  assert.deepEqual(searchAssistantEvents('10/01/2027', list, now).events.map((e) => e.id), ['a']);
+});
+
+test('filters by age, price and neighborhood', () => {
+  const list = [
+    mk('adult', { age_range: '+18', ticket_price_uyu: 800, neighborhood: 'Pocitos' }),
+    mk('older', { age_range: '+30', ticket_price_uyu: 300, neighborhood: 'Cordón' }),
+    mk('free', { age_range: 'Todas las edades', ticket_price_uyu: 0, neighborhood: 'Pocitos' }),
+  ];
+  assert.deepEqual(searchAssistantEvents('fiesta +18', list, now).events.map((e) => e.id), ['adult']);
+  assert.deepEqual(searchAssistantEvents('tengo 20 años', list, now).events.map((e) => e.id), ['adult', 'free']);
+  assert.deepEqual(searchAssistantEvents('algo hasta 500 pesos', list, now).events.map((e) => e.id), ['older', 'free']);
+  assert.deepEqual(searchAssistantEvents('en Pocitos', list, now).events.map((e) => e.id), ['adult', 'free']);
+  const cheap = searchAssistantEvents('algo barato', list, now);
+  assert.deepEqual(cheap.events.map((e) => e.id), ['free', 'older', 'adult']);
+  assert.match(cheap.reply, /Precios cargados/);
+});
+
+test('treats vague requests as open recommendations', () => {
+  const result = searchAssistantEvents('algo copado', [mk('a')], now);
+  assert.match(result.reply, /próximas opciones/);
+});
