@@ -178,6 +178,36 @@ Deno.serve(async (request) => {
     return jsonResponse({ error: "Método no permitido." }, 405);
   }
 
+  if ((request.headers.get("content-type") || "").includes("multipart/form-data")) {
+    const key = Deno.env.get("GROQ_API_KEY");
+    if (!key) return jsonResponse({ error: "Transcripción no disponible." }, 500);
+    if (Number(request.headers.get("content-length") || 0) > 3_000_000) {
+      return jsonResponse({ error: "El audio es demasiado largo." }, 413);
+    }
+    try {
+      const form = await request.formData();
+      const audio = form.get("file");
+      if (!(audio instanceof File) || audio.size === 0) {
+        return jsonResponse({ error: "No llegó audio." }, 400);
+      }
+      const upstream = new FormData();
+      upstream.append("file", audio, "audio.m4a");
+      upstream.append("model", "whisper-large-v3-turbo");
+      upstream.append("language", "es");
+      upstream.append("response_format", "json");
+      const result = await fetch("https://api.groq.com/openai/v1/audio/transcriptions", {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${key}` },
+        body: upstream,
+      });
+      if (!result.ok) return jsonResponse({ error: "No pude transcribir el audio." }, 502);
+      const json = await result.json();
+      return jsonResponse({ text: String(json.text ?? "").trim().slice(0, MAX_MESSAGE_LENGTH) });
+    } catch {
+      return jsonResponse({ error: "No pude transcribir el audio." }, 400);
+    }
+  }
+
   const contentLength = Number(request.headers.get("content-length") || 0);
   if (contentLength > MAX_BODY_BYTES) {
     return jsonResponse({ error: "La consulta es demasiado larga." }, 413);

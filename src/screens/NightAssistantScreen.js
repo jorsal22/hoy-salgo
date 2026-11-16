@@ -13,7 +13,7 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { ExpoSpeechRecognitionModule, useSpeechRecognitionEvent } from 'expo-speech-recognition';
+import { AudioModule, RecordingPresets, setAudioModeAsync, useAudioRecorder } from 'expo-audio';
 import { supabase } from '../config/supabase';
 import { filterUpcomingEvents, formatEventDate } from '../services/eventDateService';
 import { filterVerifiedEvents } from '../services/eventVerificationService';
@@ -207,45 +207,47 @@ export default function NightAssistantScreen({ onBack }) {
   const scrollRef = useRef(null);
   const [listening, setListening] = useState(false);
 
-  useSpeechRecognitionEvent('start', () => setListening(true));
-  useSpeechRecognitionEvent('end', () => setListening(false));
-  useSpeechRecognitionEvent('result', (event) => {
-    const transcript = event.results?.[0]?.transcript;
-    if (transcript) setDraft(transcript.slice(0, 400));
-  });
-  useSpeechRecognitionEvent('error', (event) => {
-    setListening(false);
-    if (event.error === 'aborted') return;
-    if (event.error === 'no-speech') {
-      Alert.alert('No te escuché', 'Hablá cerca del micrófono y volvé a intentar, o escribí tu consulta.');
-      return;
-    }
-    Alert.alert('Dictado no disponible', `No pude usar el micrófono (${event.error || 'error'}). Podés escribir tu consulta.`);
-  });
+  const [transcribing, setTranscribing] = useState(false);
+  const recorder = useAudioRecorder(RecordingPresets.LOW_QUALITY);
 
   const toggleListening = async () => {
+    if (transcribing) return;
     if (listening) {
-      ExpoSpeechRecognitionModule.stop();
+      setListening(false);
+      setTranscribing(true);
+      try {
+        await recorder.stop();
+        const uri = recorder.uri;
+        if (!uri) throw new Error('sin audio');
+        const form = new FormData();
+        form.append('file', { uri, name: 'audio.m4a', type: 'audio/m4a' });
+        const { data, error } = await supabase.functions.invoke('night-assistant', { body: form });
+        if (error) throw error;
+        if (data?.text) {
+          setDraft(data.text.slice(0, 400));
+        } else {
+          Alert.alert('No te escuché', 'Hablá cerca del micrófono y volvé a intentar, o escribí tu consulta.');
+        }
+      } catch {
+        Alert.alert('Dictado no disponible', 'No pude convertir tu voz en texto. Revisá tu conexión o escribí tu consulta.');
+      } finally {
+        setTranscribing(false);
+      }
       return;
     }
-    if (!ExpoSpeechRecognitionModule.isRecognitionAvailable()) {
-      Alert.alert('Dictado no disponible', 'Este teléfono no tiene un servicio de reconocimiento de voz activo (Google). Podés escribir tu consulta.');
-      return;
+    try {
+      const permission = await AudioModule.requestRecordingPermissionsAsync();
+      if (!permission.granted) {
+        Alert.alert('Permiso del micrófono', 'Activá el micrófono para dictar tu consulta o escribila a mano.');
+        return;
+      }
+      await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true });
+      await recorder.prepareToRecordAsync();
+      recorder.record();
+      setListening(true);
+    } catch {
+      Alert.alert('Dictado no disponible', 'No pude usar el micrófono. Podés escribir tu consulta.');
     }
-    const permission = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
-    if (!permission.granted) {
-      Alert.alert('Permiso del micrófono', 'Activá el micrófono para dictar tu consulta o escribila a mano.');
-      return;
-    }
-    ExpoSpeechRecognitionModule.start({
-      lang: 'es-419',
-      interimResults: true,
-      continuous: true,
-      androidIntentOptions: {
-        EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS: 2500,
-        EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS: 2500,
-      },
-    });
   };
   const loadEventsForFallback = async () => {
     if (eventsCacheRef.current) return eventsCacheRef.current;
@@ -438,11 +440,13 @@ export default function NightAssistantScreen({ onBack }) {
           <TouchableOpacity
             accessibilityRole="button"
             accessibilityLabel={listening ? 'Detener dictado' : 'Dictar consulta por voz'}
-            disabled={sending}
+            disabled={sending || transcribing}
             onPress={toggleListening}
             style={[styles.micButton, listening && styles.micButtonActive]}
           >
-            <Text style={styles.micButtonText}>{listening ? '■' : '🎤'}</Text>
+            {transcribing
+              ? <ActivityIndicator color="#718096" />
+              : <Text style={styles.micButtonText}>{listening ? '■' : '🎤'}</Text>}
           </TouchableOpacity>
           <TouchableOpacity
             accessibilityRole="button"
