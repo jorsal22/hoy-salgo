@@ -13,8 +13,8 @@ const corsHeaders = {
 const MAX_BODY_BYTES = 12_000;
 const MAX_MESSAGE_LENGTH = 400;
 const MAX_HISTORY_LENGTH = 6;
-const MAX_CONTEXT_EVENTS = 45;
-const MAX_RELEVANT_EVENTS = 25;
+const MAX_CONTEXT_EVENTS = 24;
+const MAX_RELEVANT_EVENTS = 14;
 const MAX_RECOMMENDATIONS = 3;
 const MAX_FOLLOW_UPS = 3;
 const MODEL = "openai/gpt-oss-20b";
@@ -266,7 +266,8 @@ Deno.serve(async (request) => {
       body: JSON.stringify({
         model: MODEL,
         temperature: 0.6,
-        max_tokens: 600,
+        max_tokens: 1200,
+        reasoning_effort: "low",
         response_format: {
           type: "json_schema",
           json_schema: {
@@ -307,7 +308,11 @@ Deno.serve(async (request) => {
     }, 429);
   }
   if (!modelResponse.ok) {
-    console.error("Night assistant provider returned an error:", modelResponse.status);
+    console.error(
+      "Night assistant provider returned an error:",
+      modelResponse.status,
+      (await modelResponse.text()).slice(0, 300),
+    );
     return jsonResponse({
       error: modelResponse.status === 401
         ? "La clave del proveedor de IA no es válida."
