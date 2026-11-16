@@ -38,7 +38,7 @@ eventos, fiestas, boliches, Uruguay, Punta del Este
 
 ## Seguridad de los datos (Data safety)
 - Recopila: nombre y correo (cuenta con Google), ID de usuario, fotos elegidas por el usuario, interacciones en la app, ubicación aproximada (opcional, efímera, solo para ordenar resultados).
-- Compartidos con terceros: no se venden; se procesan con Supabase y Google.
+- Compartidos con terceros: no se venden; se procesan con Supabase, Google y Groq (consultas al asistente y audio del dictado).
 - Cifrado en tránsito: sí.
 - Eliminación de datos: por pedido al correo de contacto (ver política).
 
@@ -48,7 +48,7 @@ eventos, fiestas, boliches, Uruguay, Punta del Este
 - Capturas de teléfono (mín. 2, ideal 4–8): pendiente, tomar desde el APK.
 
 ## Pendientes antes de enviar
-1. Reemplazar `[CORREO DE CONTACTO]` en la política.
+1. ~~Reemplazar el correo de contacto~~ (hecho: salsamendi.jorge@gmail.com). Declarar también el audio (micrófono) en Seguridad de los datos.
 2. Publicar la política en una URL pública (por ejemplo, GitHub Pages) y cargarla en Play Console.
 3. Google exige una forma de pedir la eliminación de cuenta (URL o in-app): la política la cubre por correo; ideal agregar un botón en la app.
 4. El `package` es `com.hoysalgo`. Es definitivo una vez que se sube a Play: después no se puede cambiar.

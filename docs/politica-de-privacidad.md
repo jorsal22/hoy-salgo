@@ -12,7 +12,7 @@ Hoy Salgo ("la app") es una aplicación para descubrir boliches y eventos en Uru
 - **Estadísticas de uso:** vistas de eventos o boliches y toques en enlaces de entradas, para saber qué contenido es útil. No incluyen tu ubicación exacta.
 - **Fotos:** solo accedemos a las imágenes que elegís vos al cargar un flyer o logo.
 
-No recopilamos tu ubicación exacta, contactos ni datos de pago. Si le pedís al asistente eventos "cerca tuyo", la app te pide permiso y usa tu ubicación aproximada (redondeada a unos 1 km) solo en ese momento, para ordenar los resultados; no la guardamos. Las compras de entradas se realizan en sitios de terceros (RedTickets, Passline, MiEntrada, etc.), que tienen sus propias políticas. Si tocás el botón de micrófono del asistente, la app te pide permiso y usa el reconocimiento de voz del dispositivo (Android/Google) solo mientras dictás, para convertir tu voz en texto; no guardamos el audio.
+No recopilamos tu ubicación exacta, contactos ni datos de pago. Si le pedís al asistente eventos "cerca tuyo", la app te pide permiso y usa tu ubicación aproximada (redondeada a unos 1 km) solo en ese momento, para ordenar los resultados; no la guardamos. Las compras de entradas se realizan en sitios de terceros (RedTickets, Passline, MiEntrada, etc.), que tienen sus propias políticas. Si tocás el botón de micrófono del asistente, la app te pide permiso y graba tu voz solo mientras dictás y la envía a nuestro servicio de transcripción (Groq) para convertirla en texto y enviar tu consulta al asistente; no guardamos el audio.
 
 ## Para qué usamos los datos
 
@@ -27,12 +27,13 @@ No vendemos tus datos. Usamos estos proveedores para operar la app:
 
 - **Supabase** (base de datos y autenticación).
 - **Google** (inicio de sesión).
+- **Groq** (procesa tus consultas al asistente de IA y transcribe el audio cuando usás el dictado por voz).
 
 Los enlaces de la app abren sitios externos (venta de entradas, Instagram, WhatsApp, Google Maps) que se rigen por sus propias políticas.
 
 ## Conservación y eliminación
 
-Conservamos tus datos mientras tengas cuenta. Podés pedir la eliminación de tu cuenta y de tus datos escribiendo a **[CORREO DE CONTACTO]**; la procesamos en un plazo máximo de 30 días.
+Conservamos tus datos mientras tengas cuenta. Podés pedir la eliminación de tu cuenta y de tus datos escribiendo a **salsamendi.jorge@gmail.com**; la procesamos en un plazo máximo de 30 días.
 
 ## Menores
 
@@ -40,7 +41,7 @@ La app está pensada para mayores de 18 años, ya que trata sobre vida nocturna.
 
 ## Tus derechos
 
-Conforme a la Ley N.º 18.331 de Protección de Datos Personales de Uruguay, podés acceder, rectificar y suprimir tus datos escribiendo a **[CORREO DE CONTACTO]**.
+Conforme a la Ley N.º 18.331 de Protección de Datos Personales de Uruguay, podés acceder, rectificar y suprimir tus datos escribiendo a **salsamendi.jorge@gmail.com**.
 
 ## Cambios
 
@@ -48,4 +49,4 @@ Si modificamos esta política, actualizaremos la fecha de arriba.
 
 ## Contacto
 
-**[CORREO DE CONTACTO]**
+**salsamendi.jorge@gmail.com**
