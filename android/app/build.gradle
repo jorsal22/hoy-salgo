@@ -33,7 +33,7 @@ android {
     namespace 'com.anonymous.saliofinde'
 
     defaultConfig {
-        applicationId 'com.hoysalgo'
+        applicationId 'com.jorgesalsamendi.hoysalgo'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1

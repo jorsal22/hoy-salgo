@@ -51,4 +51,4 @@ eventos, fiestas, boliches, Uruguay, Punta del Este
 1. ~~Reemplazar el correo de contacto~~ (hecho: salsamendi.jorge@gmail.com). Declarar también el audio (micrófono) en Seguridad de los datos.
 2. Publicar la política en una URL pública (por ejemplo, GitHub Pages) y cargarla en Play Console.
 3. Google exige una forma de pedir la eliminación de cuenta (URL o in-app): la política la cubre por correo; ideal agregar un botón en la app.
-4. El `package` es `com.hoysalgo`. Es definitivo una vez que se sube a Play: después no se puede cambiar.
+4. El `package` es `com.jorgesalsamendi.hoysalgo`. Es definitivo una vez que se sube a Play: después no se puede cambiar.

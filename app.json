@@ -9,7 +9,7 @@
     "userInterfaceStyle": "light",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.hoysalgo",
+      "bundleIdentifier": "com.jorgesalsamendi.hoysalgo",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
       }
@@ -36,7 +36,7 @@
         "foregroundImage": "./assets/hoy-salgo-foreground.png",
         "monochromeImage": "./assets/hoy-salgo-monochrome.png"
       },
-      "package": "com.hoysalgo"
+      "package": "com.jorgesalsamendi.hoysalgo"
     },
     "web": {
       "favicon": "./assets/favicon.png"
