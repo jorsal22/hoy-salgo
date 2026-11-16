@@ -37,6 +37,7 @@ import {
 } from '../services/favoriteService';
 import FavoriteButton from '../components/FavoriteButton';
 import PromotionWhatsAppButton from '../components/PromotionWhatsAppButton';
+import ExpandableText from '../components/ExpandableText';
 import InstagramButton from '../components/InstagramButton';
 import MyTicketsModal from '../components/MyTicketsModal';
 import TicketPurchaseModal from '../components/TicketPurchaseModal';
@@ -654,9 +655,7 @@ export default function HomeScreen({
           ) : null}
           <InstagramButton value={item.instagram_url} label={item.title || 'el evento'} />
           {item.description ? (
-            <Text style={styles.description} numberOfLines={3}>
-              {item.description}
-            </Text>
+            <ExpandableText text={item.description} lines={3} style={styles.description} />
           ) : null}
           <TouchableOpacity
             style={styles.shareButton}

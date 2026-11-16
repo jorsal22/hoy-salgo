@@ -18,6 +18,7 @@ import { filterUpcomingEvents, formatEventDate } from '../services/eventDateServ
 import { filterVerifiedEvents } from '../services/eventVerificationService';
 import { fetchAllPages } from '../services/paginationService';
 import { recordTicketClick } from '../services/analyticsService';
+import ExpandableText from '../components/ExpandableText';
 import { getTicketShareLine, normalizeTicketUrl, openTrackedTicketUrl } from '../services/ticketUrlService';
 import { getMapsSearchUrl } from '../services/mapsService';
 import {
@@ -119,7 +120,7 @@ function AssistantEventCard({ event: baseEvent }) {
       </Text>
       {details?.address ? <Text style={styles.eventAddress}>📍 {details.address}</Text> : null}
       {event.description ? (
-        <Text numberOfLines={4} style={styles.eventDescription}>{event.description}</Text>
+        <ExpandableText text={event.description} lines={4} style={styles.eventDescription} />
       ) : null}
       {event.category ? (
         <Text style={styles.eventCategory}>
