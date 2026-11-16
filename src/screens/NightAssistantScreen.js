@@ -14,6 +14,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { AudioModule, RecordingPresets, setAudioModeAsync, useAudioRecorder } from 'expo-audio';
+import * as FileSystemLegacy from 'expo-file-system/legacy';
 import { supabase } from '../config/supabase';
 import { filterUpcomingEvents, formatEventDate } from '../services/eventDateService';
 import { filterVerifiedEvents } from '../services/eventVerificationService';
@@ -219,15 +220,20 @@ export default function NightAssistantScreen({ onBack }) {
         await recorder.stop();
         const uri = recorder.uri || recorder.getStatus?.().url;
         if (!uri) throw new Error('sin audio');
-        const form = new FormData();
-        form.append('file', { uri, name: 'audio.m4a', type: 'audio/mp4' });
-        const response = await fetch(`${supabase.supabaseUrl}/functions/v1/night-assistant`, {
-          method: 'POST',
-          headers: { apikey: supabase.supabaseKey, Authorization: `Bearer ${supabase.supabaseKey}` },
-          body: form,
-        });
-        const data = await response.json().catch(() => null);
-        if (!response.ok) throw new Error(`${response.status} ${data?.error || ''}`.trim());
+        const result = await FileSystemLegacy.uploadAsync(
+          `${supabase.supabaseUrl}/functions/v1/night-assistant`,
+          uri,
+          {
+            httpMethod: 'POST',
+            uploadType: FileSystemLegacy.FileSystemUploadType.MULTIPART,
+            fieldName: 'file',
+            mimeType: 'audio/mp4',
+            headers: { apikey: supabase.supabaseKey, Authorization: `Bearer ${supabase.supabaseKey}` },
+          },
+        );
+        let data = null;
+        try { data = JSON.parse(result.body); } catch { data = null; }
+        if (result.status < 200 || result.status >= 300) throw new Error(`${result.status} ${data?.error || ''}`.trim());
         if (data?.text) {
           setDraft(data.text.slice(0, 400));
         } else {
