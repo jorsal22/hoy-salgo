@@ -17,7 +17,7 @@ const MAX_CONTEXT_EVENTS = 24;
 const MAX_RELEVANT_EVENTS = 14;
 const MAX_RECOMMENDATIONS = 3;
 const MAX_FOLLOW_UPS = 3;
-const MODELS = ["openai/gpt-oss-20b", "llama-3.3-70b-versatile", "llama-3.1-8b-instant"];
+const MODELS = ["openai/gpt-oss-20b", "openai/gpt-oss-120b", "openai/gpt-oss-safeguard-20b"];
 
 type AssistantEvent = {
   id: string;
@@ -276,7 +276,7 @@ Deno.serve(async (request) => {
   for (const model of MODELS) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 20000);
-    const isPrimary = model === MODELS[0];
+    const isPrimary = model.startsWith("openai/");
     try {
       modelResponse = await fetch("https://api.groq.com/openai/v1/chat/completions", {
         method: "POST",
