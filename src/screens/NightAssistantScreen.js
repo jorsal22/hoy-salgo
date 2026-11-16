@@ -235,7 +235,10 @@ export default function NightAssistantScreen({ onBack }) {
         try { data = JSON.parse(result.body); } catch { data = null; }
         if (result.status < 200 || result.status >= 300) throw new Error(`${result.status} ${data?.error || ''}`.trim());
         if (data?.text) {
-          setDraft(data.text.slice(0, 400));
+          const spoken = data.text.slice(0, 400);
+          setDraft(spoken);
+          setTranscribing(false);
+          sendMessage(spoken);
         } else {
           Alert.alert('No te escuché', 'Hablá cerca del micrófono y volvé a intentar, o escribí tu consulta.');
         }
