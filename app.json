@@ -52,7 +52,8 @@
         {
           "locationWhenInUsePermission": "Hoy Salgo usa tu ubicación aproximada solo cuando pedís eventos cerca tuyo."
         }
-      ]
+      ],
+      ["expo-speech-recognition", { "microphonePermission": "Hoy Salgo usa el micrófono solo cuando tocás el botón para dictar tu consulta al asistente.", "speechRecognitionPermission": "Hoy Salgo convierte tu voz en texto solo cuando dictás una consulta." }]
     ],
     "extra": {
       "eas": {

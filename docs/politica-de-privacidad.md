@@ -12,7 +12,7 @@ Hoy Salgo ("la app") es una aplicación para descubrir boliches y eventos en Uru
 - **Estadísticas de uso:** vistas de eventos o boliches y toques en enlaces de entradas, para saber qué contenido es útil. No incluyen tu ubicación exacta.
 - **Fotos:** solo accedemos a las imágenes que elegís vos al cargar un flyer o logo.
 
-No recopilamos tu ubicación exacta, contactos ni datos de pago. Si le pedís al asistente eventos "cerca tuyo", la app te pide permiso y usa tu ubicación aproximada (redondeada a unos 1 km) solo en ese momento, para ordenar los resultados; no la guardamos. Las compras de entradas se realizan en sitios de terceros (RedTickets, Passline, MiEntrada, etc.), que tienen sus propias políticas.
+No recopilamos tu ubicación exacta, contactos ni datos de pago. Si le pedís al asistente eventos "cerca tuyo", la app te pide permiso y usa tu ubicación aproximada (redondeada a unos 1 km) solo en ese momento, para ordenar los resultados; no la guardamos. Las compras de entradas se realizan en sitios de terceros (RedTickets, Passline, MiEntrada, etc.), que tienen sus propias políticas. Si tocás el botón de micrófono del asistente, la app te pide permiso y usa el reconocimiento de voz del dispositivo (Android/Google) solo mientras dictás, para convertir tu voz en texto; no guardamos el audio.
 
 ## Para qué usamos los datos
 

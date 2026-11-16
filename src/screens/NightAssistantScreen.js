@@ -13,6 +13,7 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { ExpoSpeechRecognitionModule, useSpeechRecognitionEvent } from 'expo-speech-recognition';
 import { supabase } from '../config/supabase';
 import { filterUpcomingEvents, formatEventDate } from '../services/eventDateService';
 import { filterVerifiedEvents } from '../services/eventVerificationService';
@@ -204,7 +205,33 @@ export default function NightAssistantScreen({ onBack }) {
   const sendingRef = useRef(false);
   const eventsCacheRef = useRef(null);
   const scrollRef = useRef(null);
+  const [listening, setListening] = useState(false);
 
+  useSpeechRecognitionEvent('start', () => setListening(true));
+  useSpeechRecognitionEvent('end', () => setListening(false));
+  useSpeechRecognitionEvent('result', (event) => {
+    const transcript = event.results?.[0]?.transcript;
+    if (transcript) setDraft(transcript.slice(0, 400));
+  });
+  useSpeechRecognitionEvent('error', (event) => {
+    setListening(false);
+    if (event.error !== 'aborted' && event.error !== 'no-speech') {
+      Alert.alert('Dictado no disponible', 'No pude usar el micrófono. Podés escribir tu consulta.');
+    }
+  });
+
+  const toggleListening = async () => {
+    if (listening) {
+      ExpoSpeechRecognitionModule.stop();
+      return;
+    }
+    const permission = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
+    if (!permission.granted) {
+      Alert.alert('Permiso del micrófono', 'Activá el micrófono para dictar tu consulta o escribila a mano.');
+      return;
+    }
+    ExpoSpeechRecognitionModule.start({ lang: 'es-UY', interimResults: true, continuous: false });
+  };
   const loadEventsForFallback = async () => {
     if (eventsCacheRef.current) return eventsCacheRef.current;
     const controller = new AbortController();
@@ -395,6 +422,15 @@ export default function NightAssistantScreen({ onBack }) {
           />
           <TouchableOpacity
             accessibilityRole="button"
+            accessibilityLabel={listening ? 'Detener dictado' : 'Dictar consulta por voz'}
+            disabled={sending}
+            onPress={toggleListening}
+            style={[styles.micButton, listening && styles.micButtonActive]}
+          >
+            <Text style={styles.micButtonText}>{listening ? '■' : '🎤'}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            accessibilityRole="button"
             accessibilityLabel="Enviar consulta"
             disabled={!draft.trim() || sending}
             onPress={() => sendMessage(draft)}
@@ -541,4 +577,14 @@ const styles = StyleSheet.create({
   },
   sendButtonDisabled: { opacity: 0.45 },
   sendButtonText: { color: '#FFF', fontSize: 25, fontWeight: '800', lineHeight: 29 },
+  micButton: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#2D3748',
+  },
+  micButtonActive: { backgroundColor: '#E53E3E' },
+  micButtonText: { color: '#FFF', fontSize: 20 },
 });

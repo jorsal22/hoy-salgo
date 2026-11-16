@@ -32,6 +32,7 @@ eventos, fiestas, boliches, Uruguay, Punta del Este
 - Referencias a alcohol/sustancias: sí, informativas (promoción de eventos nocturnos).
 - Apuestas: no. Compras dentro de la app: no (las entradas se compran en sitios externos).
 - Contenido generado por usuarios: sí (los usuarios pueden proponer boliches y eventos; se moderan antes de publicar).
+- Audio/voz: micrófono opcional para dictar consultas al asistente; el reconocimiento lo hace el servicio de voz del dispositivo y no guardamos audio.
 - Ubicación: ubicación aproximada, opcional, solo al pedir eventos cerca; se procesa para dar la respuesta y no se almacena.
 - Público objetivo: 18+.
 
