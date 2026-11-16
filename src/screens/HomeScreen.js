@@ -420,6 +420,30 @@ export default function HomeScreen({
     );
   };
 
+  const handleDeleteAccount = () => {
+    Alert.alert(
+      '¿Borrar tu cuenta?',
+      'Se eliminarán tu cuenta y tus favoritos de forma permanente. No se puede deshacer.',
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Borrar cuenta',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const { error } = await supabase.rpc('delete_my_account');
+              if (error) throw error;
+              await supabase.auth.signOut();
+              Alert.alert('Cuenta borrada', 'Tu cuenta fue eliminada.');
+            } catch (err) {
+              Alert.alert('No se pudo borrar la cuenta', err.message || 'Intentá de nuevo.');
+            }
+          },
+        },
+      ]
+    );
+  };
+
   const handleToggleFeatured = async (item) => {
     const next = !item.is_featured;
     try {
@@ -703,6 +727,16 @@ export default function HomeScreen({
           >
             <Text style={styles.signOut}>{isAuthenticated ? 'Salir' : 'Ingresar'}</Text>
           </TouchableOpacity>
+          {isAuthenticated ? (
+            <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityLabel="Borrar mi cuenta"
+              onPress={handleDeleteAccount}
+              style={styles.signOutButton}
+            >
+              <Text style={styles.signOut}>Borrar cuenta</Text>
+            </TouchableOpacity>
+          ) : null}
         </View>
       </View>
 
