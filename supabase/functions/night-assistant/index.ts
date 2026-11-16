@@ -13,11 +13,11 @@ const corsHeaders = {
 const MAX_BODY_BYTES = 12_000;
 const MAX_MESSAGE_LENGTH = 400;
 const MAX_HISTORY_LENGTH = 6;
-const MAX_CONTEXT_EVENTS = 24;
-const MAX_RELEVANT_EVENTS = 14;
+const MAX_CONTEXT_EVENTS = 16;
+const MAX_RELEVANT_EVENTS = 10;
 const MAX_RECOMMENDATIONS = 3;
 const MAX_FOLLOW_UPS = 3;
-const MODELS = ["openai/gpt-oss-20b", "openai/gpt-oss-120b", "openai/gpt-oss-safeguard-20b"];
+const MODELS = ["openai/gpt-oss-20b", "openai/gpt-oss-120b"];
 
 type AssistantEvent = {
   id: string;
@@ -182,7 +182,7 @@ Deno.serve(async (request) => {
       neighborhood: event.neighborhood || null,
       category: event.category || null,
       age_range: event.age_range || null,
-      description: event.description ? String(event.description).slice(0, 110) : null,
+      description: event.description ? String(event.description).slice(0, 60) : null,
       ticket_url: getSafeAssistantTicketUrl(event.ticket_url),
     }));
 
