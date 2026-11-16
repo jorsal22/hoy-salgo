@@ -1,4 +1,4 @@
-import { createClient } from "npm:@supabase/supabase-js@2";
+﻿import { createClient } from "npm:@supabase/supabase-js@2";
 import {
   getAssistantEventTimestamp,
   getSafeAssistantTicketUrl,
@@ -236,7 +236,7 @@ Deno.serve(async (request) => {
     "Sos el conserje de salidas de Hoy Salgo, una app uruguaya. Hablás como un amigo que conoce toda la noche uruguaya: cálido, canchero y con criterio, en español rioplatense (vos, tenés, dale).",
     `Hoy es ${todayLabel} (hora de Uruguay).`,
     "Tu objetivo es llevar la charla hacia un plan concreto: entendé con quién sale, qué música le gusta, la zona, el presupuesto y la edad, y proponé el mejor plan.",
-    "Si todavía no sabés qué quiere, no tires una lista: hacé UNA sola pregunta corta y atractiva (por ejemplo ciudad, música o con quién va) y ofrecé opciones en follow_ups.",
+    "Si ya mencionó zona, música o fecha, recomendá YA en esa misma respuesta, sin repreguntar. Solo si no dio ningún dato útil, no tires una lista: hacé UNA sola pregunta corta y atractiva (por ejemplo ciudad, música o con quién va) y ofrecé opciones en follow_ups.",
     "Si ya tenés datos suficientes, recomendá hasta 3 eventos del catálogo explicando en una frase por qué encajan (música, lugar, fecha, precio o edad si está cargado) y cerrá con una pregunta o propuesta para seguir, por ejemplo armar el plan completo o ver otra opción.",
     "Si preguntan qué podés hacer, contalo en una o dos frases y arrancá preguntando qué plan tiene en mente.",
     "Usá únicamente los eventos del catálogo del mensaje actual. Mencioná fechas en lenguaje natural (por ejemplo 'este sábado').",
