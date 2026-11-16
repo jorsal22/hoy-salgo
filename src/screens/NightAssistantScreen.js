@@ -258,14 +258,17 @@ export default function NightAssistantScreen({ onBack }) {
             eventsError = error;
           }
           const localAnswer = searchAssistantEvents(message, events);
-          const detail = await getAssistantErrorMessage(aiError);
+          const busy = aiError?.context?.status === 429;
           const eventsDetail = eventsError
             ? `Tampoco pude consultar los eventos: ${await getAssistantErrorMessage(eventsError)}.`
-            : 'Busqué directamente en los eventos verificados.';
+            : null;
+          const intro = busy
+            ? 'Estoy con mucha demanda, así que te muestro lo que encontré directo en la cartelera.'
+            : `${await getAssistantErrorMessage(aiError)} Busqué directamente en los eventos verificados.`;
           answer = {
-            content: `${detail} ${eventsDetail} ${localAnswer.reply}`,
+            content: [intro, eventsDetail, localAnswer.reply].filter(Boolean).join(' '),
             events: localAnswer.events,
-            isFallback: true,
+            isFallback: !busy,
           };
         }
       }
