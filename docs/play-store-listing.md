@@ -50,4 +50,4 @@ eventos, fiestas, boliches, Uruguay, Punta del Este
 1. Reemplazar `[CORREO DE CONTACTO]` en la política.
 2. Publicar la política en una URL pública (por ejemplo, GitHub Pages) y cargarla en Play Console.
 3. Google exige una forma de pedir la eliminación de cuenta (URL o in-app): la política la cubre por correo; ideal agregar un botón en la app.
-4. El `package` `com.anonymous.saliofinde` es provisorio; cambiarlo a uno definitivo solo si aún no se subió a Play (después no se puede cambiar).
+4. El `package` es `com.hoysalgo`. Es definitivo una vez que se sube a Play: después no se puede cambiar.

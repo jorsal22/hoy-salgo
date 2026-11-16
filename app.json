@@ -5,11 +5,11 @@
     "version": "1.0.0",
     "scheme": "saliofinde",
     "orientation": "portrait",
-    "icon": "./assets/icon.png",
+    "icon": "./assets/hoy-salgo-icon.png",
     "userInterfaceStyle": "light",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.anonymous.saliofinde",
+      "bundleIdentifier": "com.hoysalgo",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
       }
@@ -32,12 +32,11 @@
         }
       ],
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/android-icon-foreground.png",
-        "backgroundImage": "./assets/android-icon-background.png",
-        "monochromeImage": "./assets/android-icon-monochrome.png"
+        "backgroundColor": "#100A20",
+        "foregroundImage": "./assets/hoy-salgo-foreground.png",
+        "monochromeImage": "./assets/hoy-salgo-monochrome.png"
       },
-      "package": "com.anonymous.saliofinde"
+      "package": "com.hoysalgo"
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -46,7 +45,8 @@
       "expo-secure-store",
       "expo-web-browser",
       "expo-image",
-      "@react-native-community/datetimepicker"
+      "@react-native-community/datetimepicker",
+      "expo-status-bar"
     ],
     "extra": {
       "eas": {
