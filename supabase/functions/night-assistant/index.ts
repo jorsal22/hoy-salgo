@@ -194,7 +194,9 @@ Deno.serve(async (request) => {
       upstream.append("file", audio, "audio.m4a");
       upstream.append("model", "whisper-large-v3-turbo");
       upstream.append("language", "es");
-      upstream.append("response_format", "json");
+      upstream.append("response_format", "verbose_json");
+      upstream.append("temperature", "0");
+      upstream.append("prompt", "Consulta sobre salidas, boliches, fiestas y eventos en Uruguay.");
       const result = await fetch("https://api.groq.com/openai/v1/audio/transcriptions", {
         method: "POST",
         headers: { "Authorization": `Bearer ${key}` },
@@ -202,7 +204,18 @@ Deno.serve(async (request) => {
       });
       if (!result.ok) return jsonResponse({ error: "No pude transcribir el audio." }, 502);
       const json = await result.json();
-      return jsonResponse({ text: String(json.text ?? "").trim().slice(0, MAX_MESSAGE_LENGTH) });
+      // Whisper inventa frases como "Gracias." cuando el audio es silencio o ruido.
+      const segments = Array.isArray(json.segments) ? json.segments : [];
+      const spoken = segments.filter((s: { no_speech_prob?: number; avg_logprob?: number }) =>
+        (s.no_speech_prob ?? 0) < 0.6 && (s.avg_logprob ?? 0) > -1.2
+      );
+      const text = segments.length
+        ? spoken.map((s: { text?: string }) => String(s.text ?? "")).join(" ").trim()
+        : String(json.text ?? "").trim();
+      const normalized = text.toLowerCase().replace(/[^a-záéíóúñ ]/g, "").trim();
+      const noise = ["gracias", "muchas gracias", "gracias por ver el video", "gracias por ver", "subtítulos realizados por la comunidad de amara.org"];
+      if (!normalized || noise.includes(normalized)) return jsonResponse({ text: "" });
+      return jsonResponse({ text: text.slice(0, MAX_MESSAGE_LENGTH) });
     } catch {
       return jsonResponse({ error: "No pude transcribir el audio." }, 400);
     }

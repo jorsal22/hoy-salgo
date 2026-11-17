@@ -209,7 +209,7 @@ export default function NightAssistantScreen({ onBack }) {
   const [listening, setListening] = useState(false);
 
   const [transcribing, setTranscribing] = useState(false);
-  const recorder = useAudioRecorder(RecordingPresets.LOW_QUALITY);
+  const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
 
   const toggleListening = async () => {
     if (transcribing) return;
