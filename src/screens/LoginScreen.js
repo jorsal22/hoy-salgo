@@ -14,8 +14,12 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as AuthSession from 'expo-auth-session';
 import * as WebBrowser from 'expo-web-browser';
+import * as Crypto from 'expo-crypto';
 import { supabase } from '../config/supabase';
+import { signInWithGoogleNative } from '../services/googleNativeAuth';
 import { authCoordinator, processGoogleAuthCallback } from '../services/googleAuthCallback';
+
+const googleWebClientId = '417659073820-jfmkp5boi6gfh9j728nojoblfbsg5cco.apps.googleusercontent.com';
 
 WebBrowser.maybeCompleteAuthSession();
 
@@ -95,6 +99,24 @@ export default function LoginScreen({ onBack, onAuthenticated }) {
   };
 
   const handleGoogleLogin = () => runAuth(async () => {
+    if (Platform.OS === 'android') {
+      try {
+        const { GoogleOneTapSignIn } = require('react-native-nitro-google-signin');
+        const session = await signInWithGoogleNative({
+          google: GoogleOneTapSignIn,
+          crypto: Crypto,
+          auth: supabase.auth,
+          webClientId: googleWebClientId,
+        });
+        if (session) {
+          onAuthenticated?.(session);
+          return;
+        }
+      } catch {
+        // Si el acceso nativo falla (por ejemplo, firma no registrada), seguimos con el navegador.
+      }
+    }
+
     const redirectUri = AuthSession.makeRedirectUri({ scheme: 'saliofinde', path: 'auth/callback' });
     if (redirectUri.startsWith('exp://')) {
       throw new Error('El acceso con Google requiere la app instalada en un build de desarrollo o producción.');
