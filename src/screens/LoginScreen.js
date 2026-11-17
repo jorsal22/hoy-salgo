@@ -13,16 +13,13 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as AuthSession from 'expo-auth-session';
-import * as Crypto from 'expo-crypto';
 import * as WebBrowser from 'expo-web-browser';
 import { supabase } from '../config/supabase';
 import { authCoordinator, processGoogleAuthCallback } from '../services/googleAuthCallback';
-import { signInWithGoogleNative } from '../services/googleNativeAuth';
 
 WebBrowser.maybeCompleteAuthSession();
 
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const googleWebClientId = '417659073820-jfmkp5boi6gfh9j728nojoblfbsg5cco.apps.googleusercontent.com';
 
 export default function LoginScreen({ onBack, onAuthenticated }) {
   const [email, setEmail] = useState('');
@@ -98,18 +95,6 @@ export default function LoginScreen({ onBack, onAuthenticated }) {
   };
 
   const handleGoogleLogin = () => runAuth(async () => {
-    if (Platform.OS === 'android') {
-      const { GoogleOneTapSignIn } = require('react-native-nitro-google-signin');
-      const session = await signInWithGoogleNative({
-        google: GoogleOneTapSignIn,
-        crypto: Crypto,
-        auth: supabase.auth,
-        webClientId: googleWebClientId,
-      });
-      if (session) onAuthenticated?.(session);
-      return;
-    }
-
     const redirectUri = AuthSession.makeRedirectUri({ scheme: 'saliofinde', path: 'auth/callback' });
     if (redirectUri.startsWith('exp://')) {
       throw new Error('El acceso con Google requiere la app instalada en un build de desarrollo o producción.');
